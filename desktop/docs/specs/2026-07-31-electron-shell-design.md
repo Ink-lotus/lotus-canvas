@@ -123,7 +123,7 @@ Electron session.webRequest.onHeadersReceived
 - **所有分支必须调用 `callback()`**，包含异常分支。漏调一次会使该请求永久挂起，表现为应用卡住且无任何报错，极难排查。拦截器整体包 try/catch，catch 分支调用 `callback({})`
 - **`Access-Control-Allow-Headers: *` 按 Fetch 规范不覆盖 `Authorization`**，必须显式列出。否则预检照样失败，且报错信息具误导性
 
-**保留 `webSecurity: true`。** 项目含插件系统（`web/src/lib/canvas/plugin-loader.ts` 从 URL 加载远程 JS）与第三方提示词仓库拉取，关闭 webSecurity 会放大这些远程代码的权限。上述约 20 行的拦截保留了完整安全模型。
+**保留 `webSecurity: true`。** 项目含插件系统（`web/src/lib/canvas/plugin-loader.ts` 从 URL 加载远程 JS）与第三方提示词仓库拉取，关闭 webSecurity 会放大这些远程代码的权限。需说明的是：`webSecurity: true` 与 `Access-Control-Allow-Origin: *` 是正交的两件事——前者保证插件等远程代码拿不到 Node 与文件系统权限；后者却确实移除了被拦截主机的跨域读取保护，这是本方案对公网主机自觉接受的取舍。为此拦截范围收窄到公网地址（`desktop/src/cors.js` 的 `isNonPublicHost`），使插件代码无法借注入的 CORS 头去读取回环与内网服务。
 
 ### 3. 数据存储
 
@@ -177,6 +177,8 @@ curl -s -o /dev/null -D - -X OPTIONS "<BASE_URL>/models" \
 2. **`Access-Control-Allow-Origin: *` 与携带凭据的请求不兼容。** 若 WebDAV 同步出现问题，改为回显请求的 `Origin` 头并添加 `Access-Control-Allow-Credentials: true`
 3. **无前端热更新。** 改 `web/` 需 `bun run build`
 4. **未签名。** 可能触发 Windows Defender 或国产杀软提示
+5. **拦截跳过回环、私网与链路本地地址。** 因此运行在 `localhost` 或内网地址上的中继在本套壳内不生效。若将来确有需要，放宽 `desktop/src/cors.js` 中的 `isNonPublicHost` 即可
+6. **主机检查基于主机名、不做 DNS 解析。** 因此解析到内网 IP 的公网域名不会被拦截（DNS rebinding）。作为单用户本机工具，接受该风险
 
 ## 上游同步
 

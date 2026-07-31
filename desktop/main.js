@@ -1,6 +1,5 @@
 "use strict";
 
-const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 const { app, BrowserWindow, net, protocol, session } = require("electron");
 

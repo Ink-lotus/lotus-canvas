@@ -27,6 +27,27 @@ test("shouldInterceptUrl 只拦截 http/https", () => {
     assert.strictEqual(shouldInterceptUrl(undefined), false);
 });
 
+test("shouldInterceptUrl 跳过回环与内网地址", () => {
+    assert.strictEqual(shouldInterceptUrl("http://localhost:3000/v1/models"), false);
+    assert.strictEqual(shouldInterceptUrl("http://127.0.0.1:8080/v1"), false);
+    assert.strictEqual(shouldInterceptUrl("http://0.0.0.0/v1"), false);
+    assert.strictEqual(shouldInterceptUrl("http://10.0.0.1/v1"), false);
+    assert.strictEqual(shouldInterceptUrl("http://172.16.0.1/v1"), false);
+    assert.strictEqual(shouldInterceptUrl("http://192.168.1.5/v1"), false);
+    assert.strictEqual(shouldInterceptUrl("http://169.254.169.254/latest/meta-data"), false);
+    assert.strictEqual(shouldInterceptUrl("http://[::1]:3000/v1"), false);
+    assert.strictEqual(shouldInterceptUrl("https://100.64.0.1/v1"), false);
+    assert.strictEqual(shouldInterceptUrl("http://myserver.local/v1"), false);
+});
+
+test("shouldInterceptUrl 保留公网边界地址", () => {
+    assert.strictEqual(shouldInterceptUrl("http://172.32.0.1/v1"), true);
+    assert.strictEqual(shouldInterceptUrl("http://172.15.0.1/v1"), true);
+    assert.strictEqual(shouldInterceptUrl("http://192.169.1.5/v1"), true);
+    assert.strictEqual(shouldInterceptUrl("http://100.128.0.1/v1"), true);
+    assert.strictEqual(shouldInterceptUrl("https://11.0.0.1/v1"), true);
+});
+
 test("buildCorsResponse 注入四个 CORS 头，Allow-Headers 显式包含 Authorization", () => {
     const { responseHeaders } = buildCorsResponse({ method: "POST", statusCode: 200, responseHeaders: {} });
     assert.deepStrictEqual(responseHeaders["Access-Control-Allow-Origin"], ["*"]);
