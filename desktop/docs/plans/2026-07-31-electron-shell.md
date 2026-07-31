@@ -67,7 +67,7 @@
     "main": "main.js",
     "scripts": {
         "start": "electron .",
-        "test": "node --test test/",
+        "test": "node --test test/*.test.js",
         "build": "electron-builder --config builder.yml"
     },
     "devDependencies": {
