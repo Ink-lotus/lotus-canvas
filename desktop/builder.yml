@@ -1,0 +1,14 @@
+appId: app.lotuscanvas.desktop
+productName: lotus-canvas
+directories:
+  output: release
+files:
+  - main.js
+  - src/**/*
+  - package.json
+extraResources:
+  - from: ../web/dist
+    to: dist
+win:
+  target:
+    - dir
