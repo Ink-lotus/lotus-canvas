@@ -5,7 +5,7 @@ const { app, BrowserWindow, Menu, net, protocol, session } = require("electron")
 
 const { buildCorsResponse, corsHeaderEntries, shouldInterceptUrl } = require("./src/cors");
 const { resolveAppAssetPath } = require("./src/app-protocol");
-const { isPreflight, relayRequest, shouldRelay } = require("./src/relay");
+const { relayDecision, relayRequest } = require("./src/relay");
 const { resolveDistDir, resolveUserDataDir } = require("./src/paths");
 
 const APP_SCHEME = "app";
@@ -74,10 +74,11 @@ function relayErrorResponse(error) {
 function registerHttpsRelay() {
     protocol.handle("https", async (request) => {
         try {
-            if (isPreflight(request.method)) {
+            const decision = relayDecision(request.method, shouldInterceptUrl(request.url));
+            if (decision === "preflight") {
                 return new Response(null, { status: 200, headers: corsHeaderEntries() });
             }
-            if (shouldRelay(request.method)) {
+            if (decision === "relay") {
                 if (process.env.LOTUS_CORS_LOG === "1") console.log(`[relay] ${request.method} ${request.url}`);
                 return await relayRequest(request);
             }

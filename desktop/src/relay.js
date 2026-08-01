@@ -34,6 +34,17 @@ function isPreflight(method) {
     return String(method || "").toUpperCase() === "OPTIONS";
 }
 
+/**
+ * 路由决策。预检本地应答与 POST 中继都必须限制在公网主机：
+ * 二者都会给响应打上宽松的 CORS 头，而渲染进程中运行着从 URL 加载的远程插件代码。
+ * 若对内网主机也放行，插件即可借这些头读取内网服务——这正是 shouldInterceptUrl 要守住的边界。
+ */
+function relayDecision(method, isPublicHost) {
+    if (isPreflight(method)) return isPublicHost ? "preflight" : "passthrough";
+    if (shouldRelay(method)) return isPublicHost ? "relay" : "passthrough";
+    return "passthrough";
+}
+
 /** 由请求 URL 与请求头构造 Node https.request 的参数 */
 function buildRelayOptions(rawUrl, headers) {
     const url = new URL(rawUrl);
@@ -89,4 +100,4 @@ async function relayRequest(request) {
     });
 }
 
-module.exports = { shouldRelay, isPreflight, buildRelayOptions, relayRequest, DROPPED_RESPONSE_HEADERS };
+module.exports = { shouldRelay, isPreflight, relayDecision, buildRelayOptions, relayRequest, DROPPED_RESPONSE_HEADERS };

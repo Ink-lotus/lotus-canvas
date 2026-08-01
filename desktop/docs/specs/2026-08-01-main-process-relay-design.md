@@ -155,3 +155,5 @@ protocol.handle("https")                     ← 主进程接管全部 https
 3. **根因未经抓包证实。** 若实测后 524 仍然出现，说明推断有误，需在 wisart 上直接抓包重新定位
 4. **POST 不再产生预检 OPTIONS（Task 2 实测已确认）。** 当 `protocol.handle("https")` 接管请求后，实测根本没有生成任何 OPTIONS 预检——既没有 OPTIONS 进入主进程处理器，也没有 OPTIONS 发往网络。原先「预检是否会路由到自定义协议处理器」的疑问就此消解：既无预检，「本地应答预检」这一分支在 POST 场景下不会被触发，也无需触发
 5. 前一设计的已知限制中，「中转站丢弃 OPTIONS 连接」一条对 POST 请求不再适用——如第 4 条所述，POST 已不再产生预检，也就不存在会被中转站丢弃的 OPTIONS
+6. **POST 与 GET 走不同的网络栈。** 中继后的 POST 由 Node 内置 `https` 发出，GET 仍由 Chromium 发出。Node 不读取系统 / PAC 代理设置，使用其自带 CA 库而非操作系统证书库，且仅支持 HTTP/1.1。因此在企业代理、仅支持 HTTP/2 的端点或私有 CA 的 TLS 拦截环境下，可能出现 POST 失败而 GET 正常的分裂现象，需针对中继侧单独排查代理与证书配置
+7. **中继与本地预检仅对公网主机生效。** `relayDecision`（见 `desktop/src/relay.js`）先用 `shouldInterceptUrl` 判定主机是否为公网：非公网（回环 / 私网 / 链路本地）的 POST 与 OPTIONS 一律透传，既不走中继也不本地应答预检。原因是二者都会给响应打上宽松的 CORS 头，而渲染进程运行着从 URL 加载的远程插件代码，若对内网主机放行，插件即可借这些头读取内网服务——此边界与 `onHeadersReceived` 侧的 `shouldInterceptUrl` 判定保持一致

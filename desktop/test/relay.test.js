@@ -58,3 +58,17 @@ test("buildRelayOptions 保留显式端口与查询串", () => {
 test("buildRelayOptions 容忍空 headers", () => {
     assert.deepStrictEqual(buildRelayOptions("https://a.example.com/p", undefined).headers, {});
 });
+
+test("relayDecision 只对公网主机放行中继与预检", () => {
+    const { relayDecision } = require("../src/relay");
+    assert.strictEqual(relayDecision("POST", true), "relay");
+    assert.strictEqual(relayDecision("OPTIONS", true), "preflight");
+    assert.strictEqual(relayDecision("GET", true), "passthrough");
+});
+
+test("relayDecision 对非公网主机一律透传，不中继也不应答预检", () => {
+    const { relayDecision } = require("../src/relay");
+    assert.strictEqual(relayDecision("POST", false), "passthrough");
+    assert.strictEqual(relayDecision("OPTIONS", false), "passthrough");
+    assert.strictEqual(relayDecision("GET", false), "passthrough");
+});
