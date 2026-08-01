@@ -95,3 +95,13 @@ test("buildCorsResponse 保留上游业务响应头", () => {
     });
     assert.deepStrictEqual(responseHeaders["Content-Type"], ["application/json"]);
 });
+
+test("corsHeaderEntries 返回四个头且 Allow-Headers 显式包含 Authorization", () => {
+    const { corsHeaderEntries } = require("../src/cors");
+    const entries = corsHeaderEntries();
+    assert.strictEqual(Object.keys(entries).length, 4);
+    assert.strictEqual(entries["Access-Control-Allow-Origin"], "*");
+    assert.strictEqual(entries["Access-Control-Expose-Headers"], "*");
+    assert.ok(entries["Access-Control-Allow-Headers"].includes("Authorization"));
+    assert.ok(entries["Access-Control-Allow-Methods"].includes("OPTIONS"));
+});

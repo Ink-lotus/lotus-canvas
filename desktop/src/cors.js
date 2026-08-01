@@ -6,6 +6,16 @@ const CORS_HEADER_PREFIX = "access-control-";
 const ALLOW_HEADERS = "Authorization, Content-Type, Accept, x-goog-api-key, *";
 const ALLOW_METHODS = "GET, POST, PUT, DELETE, PATCH, OPTIONS";
 
+/** 四个 CORS 响应头的普通对象形式，供 buildCorsResponse 与主进程中继共用，避免两处各写一份 */
+function corsHeaderEntries() {
+    return {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Headers": ALLOW_HEADERS,
+        "Access-Control-Allow-Methods": ALLOW_METHODS,
+        "Access-Control-Expose-Headers": "*",
+    };
+}
+
 /** 按大小写不敏感移除所有 Access-Control-* 响应头，避免与上游自带的 CORS 头重复 */
 function stripCorsHeaders(responseHeaders) {
     const result = {};
@@ -60,10 +70,9 @@ function shouldInterceptUrl(url) {
 /** 构造 onHeadersReceived 的响应对象；预检非 2xx 时改写状态行 */
 function buildCorsResponse(details) {
     const responseHeaders = stripCorsHeaders(details.responseHeaders);
-    responseHeaders["Access-Control-Allow-Origin"] = ["*"];
-    responseHeaders["Access-Control-Allow-Headers"] = [ALLOW_HEADERS];
-    responseHeaders["Access-Control-Allow-Methods"] = [ALLOW_METHODS];
-    responseHeaders["Access-Control-Expose-Headers"] = ["*"];
+    for (const [name, value] of Object.entries(corsHeaderEntries())) {
+        responseHeaders[name] = [value];
+    }
 
     const isPreflight = String(details.method || "").toUpperCase() === "OPTIONS";
     const statusCode = Number(details.statusCode);
@@ -73,4 +82,4 @@ function buildCorsResponse(details) {
     return { responseHeaders };
 }
 
-module.exports = { stripCorsHeaders, shouldInterceptUrl, buildCorsResponse };
+module.exports = { stripCorsHeaders, shouldInterceptUrl, buildCorsResponse, corsHeaderEntries };
