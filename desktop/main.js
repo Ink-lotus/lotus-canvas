@@ -3,8 +3,9 @@
 const { pathToFileURL } = require("node:url");
 const { app, BrowserWindow, net, protocol, session } = require("electron");
 
-const { buildCorsResponse, shouldInterceptUrl } = require("./src/cors");
+const { buildCorsResponse, corsHeaderEntries, shouldInterceptUrl } = require("./src/cors");
 const { resolveAppAssetPath } = require("./src/app-protocol");
+const { isPreflight, relayRequest, shouldRelay } = require("./src/relay");
 const { resolveDistDir, resolveUserDataDir } = require("./src/paths");
 
 const APP_SCHEME = "app";
@@ -61,6 +62,33 @@ function registerAppProtocol() {
     });
 }
 
+function relayErrorResponse(error) {
+    const message = error && error.message ? error.message : String(error);
+    return new Response(JSON.stringify({ error: { message: `主进程中继失败：${message}` } }), {
+        status: 502,
+        headers: { ...corsHeaderEntries(), "Content-Type": "application/json; charset=utf-8" },
+    });
+}
+
+// 接管 https：POST 由主进程发出以保持长连接存活，其余原样透传。
+function registerHttpsRelay() {
+    protocol.handle("https", async (request) => {
+        try {
+            if (isPreflight(request.method)) {
+                return new Response(null, { status: 200, headers: corsHeaderEntries() });
+            }
+            if (shouldRelay(request.method)) {
+                if (process.env.LOTUS_CORS_LOG === "1") console.log(`[relay] ${request.method} ${request.url}`);
+                return await relayRequest(request);
+            }
+            return await net.fetch(request, { bypassCustomProtocolHandlers: true });
+        } catch (error) {
+            console.error("[relay] failed:", error);
+            return relayErrorResponse(error);
+        }
+    });
+}
+
 function createWindow() {
     const win = new BrowserWindow({
         width: 1600,
@@ -80,6 +108,7 @@ function createWindow() {
 app.whenReady().then(() => {
     registerCorsInterceptor();
     registerAppProtocol();
+    registerHttpsRelay();
     createWindow();
 
     app.on("activate", () => {

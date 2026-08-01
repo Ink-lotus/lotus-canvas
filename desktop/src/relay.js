@@ -1,5 +1,13 @@
 "use strict";
 
+const https = require("node:https");
+const { Readable } = require("node:stream");
+
+const { corsHeaderEntries } = require("./cors");
+
+const RELAY_TIMEOUT_MS = 30 * 60 * 1000;
+const KEEPALIVE_DELAY_MS = 15_000;
+
 // 转发给上游时必须剔除的请求头。
 // content-length 一并剔除：请求体由中继整体缓冲后重新写出，长度由中继自行设置，
 // 沿用原值会在任何字节差异下造成上游解析错乱。
@@ -43,4 +51,42 @@ function buildRelayOptions(rawUrl, headers) {
     };
 }
 
-module.exports = { shouldRelay, isPreflight, buildRelayOptions, DROPPED_RESPONSE_HEADERS };
+/**
+ * 由主进程发起上游请求并返回 Web Response。
+ *
+ * 存在的唯一理由是 socket.setKeepAlive：生图期间连接上没有任何字节流动，
+ * 中间层（网关 / NAT）会在约 100 秒后静默切断空闲连接，导致客户端收到 524，
+ * 而上游照常算完并计费。定期 TCP keepalive 探测使连接在等待期间保持存活。
+ * 浏览器环境无法控制该行为，因此这段必须在主进程执行。
+ */
+async function relayRequest(request) {
+    const options = buildRelayOptions(request.url, request.headers);
+    const bodyBuffer = request.body ? Buffer.from(await request.arrayBuffer()) : null;
+    if (bodyBuffer) options.headers["content-length"] = String(bodyBuffer.length);
+    options.method = request.method;
+
+    return await new Promise((resolve, reject) => {
+        const upstream = https.request(options, (response) => {
+            const headers = { ...corsHeaderEntries() };
+            for (const [name, value] of Object.entries(response.headers)) {
+                const lower = name.toLowerCase();
+                if (DROPPED_RESPONSE_HEADERS.has(lower)) continue;
+                if (lower.startsWith("access-control-")) continue;
+                headers[name] = Array.isArray(value) ? value.join(", ") : String(value);
+            }
+            // 流式回传：SSE 通道与大体积 base64 图片都不能整体缓冲
+            resolve(new Response(Readable.toWeb(response), { status: response.statusCode, headers }));
+        });
+
+        upstream.on("socket", (socket) => socket.setKeepAlive(true, KEEPALIVE_DELAY_MS));
+        upstream.setTimeout(RELAY_TIMEOUT_MS, () => {
+            upstream.destroy(new Error(`上游 ${RELAY_TIMEOUT_MS / 60000} 分钟未响应`));
+        });
+        upstream.on("error", reject);
+
+        if (bodyBuffer) upstream.end(bodyBuffer);
+        else upstream.end();
+    });
+}
+
+module.exports = { shouldRelay, isPreflight, buildRelayOptions, relayRequest, DROPPED_RESPONSE_HEADERS };
