@@ -7,7 +7,9 @@
     "scripts": {
         "start": "electron .",
         "test": "node --test test/*.test.js",
-        "build": "electron-builder --config builder.yml"
+        "build": "electron-builder --config builder.yml",
+        "deploy": "node scripts/deploy.js",
+        "release": "npm run build && npm run deploy"
     },
     "devDependencies": {
         "electron": "43.2.0",
