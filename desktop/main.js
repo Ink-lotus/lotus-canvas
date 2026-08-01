@@ -1,7 +1,7 @@
 "use strict";
 
 const { pathToFileURL } = require("node:url");
-const { app, BrowserWindow, net, protocol, session } = require("electron");
+const { app, BrowserWindow, Menu, net, protocol, session } = require("electron");
 
 const { buildCorsResponse, corsHeaderEntries, shouldInterceptUrl } = require("./src/cors");
 const { resolveAppAssetPath } = require("./src/app-protocol");
@@ -101,11 +101,22 @@ function createWindow() {
         },
     });
     win.once("ready-to-show", () => win.show());
+    // 默认菜单被移除后，devtools 快捷键随之失效，这里显式补回
+    win.webContents.on("before-input-event", (event, input) => {
+        if (input.type !== "keyDown") return;
+        const isF12 = input.key === "F12";
+        const isInspect = input.control && input.shift && input.key.toLowerCase() === "i";
+        if (!isF12 && !isInspect) return;
+        win.webContents.toggleDevTools();
+        event.preventDefault();
+    });
     win.loadURL(APP_ORIGIN);
     return win;
 }
 
 app.whenReady().then(() => {
+    // 移除默认的 File / Edit / View / Window 菜单
+    Menu.setApplicationMenu(null);
     registerCorsInterceptor();
     registerAppProtocol();
     registerHttpsRelay();
