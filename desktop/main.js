@@ -1,9 +1,10 @@
 "use strict";
 
 const { pathToFileURL } = require("node:url");
-const { app, BrowserWindow, Menu, net, protocol, session } = require("electron");
+const { app, BrowserWindow, Menu, net, protocol, session, shell, dialog } = require("electron");
 
 const { buildCorsResponse, corsHeaderEntries, shouldInterceptUrl } = require("./src/cors");
+const { isExternalUrl } = require("./src/external-navigation");
 const { resolveAppAssetPath } = require("./src/app-protocol");
 const { relayDecision, relayRequest } = require("./src/relay");
 const { resolveDistDir, resolveUserDataDir } = require("./src/paths");
@@ -90,6 +91,20 @@ function registerHttpsRelay() {
     });
 }
 
+// 外部 http(s) 链接不放进壳内渲染：弹框询问，选是则交给系统默认浏览器，选否则取消跳转。
+async function askOpenExternal(win, url) {
+    const result = await dialog.showMessageBox(win, {
+        type: "question",
+        buttons: ["打开", "取消"],
+        defaultId: 0,
+        cancelId: 1,
+        title: "打开外部链接",
+        message: "是否使用系统默认浏览器打开？",
+        detail: url,
+    });
+    if (result.response === 0) await shell.openExternal(url);
+}
+
 function createWindow() {
     const win = new BrowserWindow({
         width: 1600,
@@ -102,6 +117,15 @@ function createWindow() {
         },
     });
     win.once("ready-to-show", () => win.show());
+    // 前端 target="_blank" / window.open 的外链：拦截并由用户决定是否用默认浏览器打开；
+    // 非外链维持 Electron 默认，避免改变壳内其它行为
+    win.webContents.setWindowOpenHandler(({ url }) => {
+        if (isExternalUrl(url)) {
+            void askOpenExternal(win, url);
+            return { action: "deny" };
+        }
+        return {};
+    });
     // 默认菜单被移除后，devtools 快捷键随之失效，这里显式补回
     win.webContents.on("before-input-event", (event, input) => {
         if (input.type !== "keyDown") return;
