@@ -3,6 +3,7 @@ import localforage from "localforage";
 import { nanoid } from "nanoid";
 import i18n from "@/i18n";
 import { readImageMeta } from "@/lib/image-utils";
+import { deleteDesktopMedia, desktopMediaUrl, getDesktopMediaBlob, hasDesktopMedia, isDesktopMediaLibrary, listDesktopMediaKeys, putDesktopMedia } from "@/services/desktop-media-storage";
 
 export type UploadedImage = {
     url: string;
@@ -18,11 +19,13 @@ const imageLogStore = localforage.createInstance({ name: "infinite-canvas", stor
 const videoLogStore = localforage.createInstance({ name: "infinite-canvas", storeName: "video_generation_logs" });
 const objectUrls = new Map<string, string>();
 
-export async function uploadImage(input: string | Blob): Promise<UploadedImage> {
+export async function uploadImage(input: string | Blob, options?: { suggestedName?: string }): Promise<UploadedImage> {
     const blob = typeof input === "string" ? await (await fetch(input)).blob() : input;
     const storageKey = `image:${nanoid()}`;
-    await store.setItem(storageKey, blob);
-    const url = URL.createObjectURL(blob);
+    const desktop = isDesktopMediaLibrary();
+    if (desktop) await putDesktopMedia(storageKey, blob, options?.suggestedName || (input instanceof File ? input.name : ""));
+    else await store.setItem(storageKey, blob);
+    const url = desktop ? desktopMediaUrl(storageKey) : URL.createObjectURL(blob);
     objectUrls.set(storageKey, url);
     const meta = await readImageMeta(url);
     return { url, storageKey, width: meta.width, height: meta.height, bytes: blob.size, mimeType: blob.type || meta.mimeType };
@@ -32,6 +35,11 @@ export async function resolveImageUrl(storageKey?: string, fallback = "") {
     if (!storageKey) return fallback;
     const cached = objectUrls.get(storageKey);
     if (cached) return cached;
+    if (isDesktopMediaLibrary() && (await hasDesktopMedia(storageKey))) {
+        const url = desktopMediaUrl(storageKey);
+        objectUrls.set(storageKey, url);
+        return url;
+    }
     const blob = await store.getItem<Blob>(storageKey);
     if (!blob) return fallback;
     const url = URL.createObjectURL(blob);
@@ -40,12 +48,18 @@ export async function resolveImageUrl(storageKey?: string, fallback = "") {
 }
 
 export async function getImageBlob(storageKey: string) {
+    if (isDesktopMediaLibrary()) {
+        const blob = await getDesktopMediaBlob(storageKey);
+        if (blob) return blob;
+    }
     return store.getItem<Blob>(storageKey);
 }
 
 export async function setImageBlob(storageKey: string, blob: Blob) {
-    await store.setItem(storageKey, blob);
-    const url = URL.createObjectURL(blob);
+    const desktop = isDesktopMediaLibrary();
+    if (desktop) await putDesktopMedia(storageKey, blob);
+    else await store.setItem(storageKey, blob);
+    const url = desktop ? desktopMediaUrl(storageKey) : URL.createObjectURL(blob);
     objectUrls.set(storageKey, url);
     return url;
 }
@@ -60,8 +74,9 @@ export async function deleteStoredImages(keys: Iterable<string>) {
     await Promise.all(
         Array.from(new Set(keys)).map(async (key) => {
             const url = objectUrls.get(key);
-            if (url) URL.revokeObjectURL(url);
+            if (url?.startsWith("blob:")) URL.revokeObjectURL(url);
             objectUrls.delete(key);
+            if (isDesktopMediaLibrary()) await deleteDesktopMedia(key);
             await store.removeItem(key);
         }),
     );
@@ -81,6 +96,12 @@ export async function cleanupUnusedImages(usedData: unknown) {
     await store.iterate((_value, key) => {
         if (!usedKeys.has(key)) unused.push(key);
     });
+    if (isDesktopMediaLibrary()) {
+        const desktopKeys = await listDesktopMediaKeys("image");
+        desktopKeys.forEach((key) => {
+            if (!usedKeys.has(key)) unused.push(key);
+        });
+    }
     await deleteStoredImages(unused);
 }
 

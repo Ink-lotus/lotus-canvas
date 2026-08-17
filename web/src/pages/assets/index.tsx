@@ -5,8 +5,10 @@ import { saveAs } from "file-saver";
 import { useTranslation } from "react-i18next";
 
 import { useCopyText } from "@/hooks/use-copy-text";
+import { DesktopMediaActions } from "@/components/desktop-media-actions";
 import { formatBytes, readFileAsDataUrl } from "@/lib/image-utils";
 import { uploadImage } from "@/services/image-storage";
+import { isDesktopMediaLibrary } from "@/services/desktop-media-storage";
 import { cn } from "@/lib/utils";
 import { useAssetStore, type Asset, type AssetKind, type ImageAsset } from "@/stores/use-asset-store";
 import { exportAssets, readAssetPackage } from "./asset-transfer";
@@ -401,6 +403,7 @@ export default function AssetsPage() {
 
 function AssetCard({ asset, onOpen, onEdit, onCopy, onDownload, onDelete }: { asset: Asset; onOpen: () => void; onEdit: () => void; onCopy: (asset: Asset) => void; onDownload: (asset: Asset) => void; onDelete: () => void }) {
     const { t } = useTranslation();
+    const downloadLabel = t(isDesktopMediaLibrary() ? "common.exportCopy" : "common.download");
     const cover = asset.coverUrl || (asset.kind === "image" ? asset.data.dataUrl : "");
     const summary = assetSummary(asset);
     return (
@@ -442,7 +445,7 @@ function AssetCard({ asset, onOpen, onEdit, onCopy, onDownload, onDelete }: { as
                     </div>
                 </div>
             </button>
-            <div className="flex items-center gap-2 px-4 pb-4">
+            <div className="flex flex-wrap items-center gap-2 px-4 pb-4">
                 <Button size="small" onClick={onOpen}>
                     {t("common.view")}
                 </Button>
@@ -458,9 +461,10 @@ function AssetCard({ asset, onOpen, onEdit, onCopy, onDownload, onDelete }: { as
                 ) : null}
                 {asset.kind === "image" || asset.kind === "video" ? (
                     <Button size="small" icon={<Download className="size-3.5" />} onClick={() => onDownload(asset)}>
-                        {t("common.download")}
+                        {downloadLabel}
                     </Button>
                 ) : null}
+                {asset.kind === "image" || asset.kind === "video" ? <DesktopMediaActions storageKey={asset.data.storageKey} /> : null}
                 <Button size="small" danger icon={<Trash2 className="size-3.5" />} onClick={onDelete}>
                     {t("common.delete")}
                 </Button>
@@ -471,6 +475,7 @@ function AssetCard({ asset, onOpen, onEdit, onCopy, onDownload, onDelete }: { as
 
 function AssetDrawer({ asset, onClose, onCopy, onDownload }: { asset: Asset | null; onClose: () => void; onCopy: (asset: Asset) => void; onDownload: (asset: Asset) => void }) {
     const { t } = useTranslation();
+    const exportCopy = isDesktopMediaLibrary();
     const cover = asset ? asset.coverUrl || (asset.kind === "image" ? asset.data.dataUrl : "") : "";
     return (
         <Drawer title={t("assets.details")} open={Boolean(asset)} size="large" onClose={onClose}>
@@ -520,9 +525,10 @@ function AssetDrawer({ asset, onClose, onCopy, onDownload }: { asset: Asset | nu
                         ) : null}
                         {asset.kind === "image" || asset.kind === "video" ? (
                             <Button type="primary" icon={<Download className="size-4" />} onClick={() => onDownload(asset)}>
-                                {asset.kind === "video" ? t("assets.downloadVideo") : t("assets.downloadImage")}
+                                {exportCopy ? t("common.exportCopy") : asset.kind === "video" ? t("assets.downloadVideo") : t("assets.downloadImage")}
                             </Button>
                         ) : null}
+                        {asset.kind === "image" || asset.kind === "video" ? <DesktopMediaActions storageKey={asset.data.storageKey} /> : null}
                     </Space>
                 </div>
             ) : null}

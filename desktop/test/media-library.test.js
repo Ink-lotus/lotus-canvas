@@ -1,0 +1,60 @@
+"use strict";
+
+const { test } = require("node:test");
+const assert = require("node:assert");
+const fs = require("node:fs/promises");
+const os = require("node:os");
+const path = require("node:path");
+
+const { MediaLibrary, resolveEntryPath, validateStorageKey } = require("../src/media-library");
+const { parseRange } = require("../src/media-protocol");
+
+async function withLibrary(run) {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "lotus-media-"));
+    try {
+        await run(new MediaLibrary(root), root);
+    } finally {
+        await fs.rm(root, { recursive: true, force: true });
+    }
+}
+
+test("storageKey 和索引路径拒绝路径穿越", () => {
+    assert.throws(() => validateStorageKey("image:../../secret"));
+    assert.throws(() => resolveEntryPath("C:\\library", "../secret.png"));
+});
+
+test("相同内容共享物理文件，最后一个映射删除时才进入回收站", async () => {
+    await withLibrary(async (library) => {
+        const first = await library.put("image:first", Buffer.from("same"), { mimeType: "image/png", suggestedName: "first.png" });
+        const second = await library.put("image:second", Buffer.from("same"), { mimeType: "image/png", suggestedName: "second.png" });
+        assert.strictEqual(first.path, second.path);
+        const trashed = [];
+        await library.remove("image:first", async (filePath) => trashed.push(filePath));
+        assert.strictEqual(trashed.length, 0);
+        await library.remove("image:second", async (filePath) => trashed.push(filePath));
+        assert.strictEqual(trashed.length, 1);
+    });
+});
+
+test("相同 storageKey 内容冲突时拒绝覆盖", async () => {
+    await withLibrary(async (library) => {
+        await library.put("video:item", Buffer.from("one"), { mimeType: "video/mp4" });
+        await assert.rejects(() => library.put("video:item", Buffer.from("two"), { mimeType: "video/mp4" }), /不同媒体内容/);
+    });
+});
+
+test("相同 storageKey 的物理文件缺失时允许按原内容修复", async () => {
+    await withLibrary(async (library) => {
+        await library.put("image:repair", Buffer.from("same"), { mimeType: "image/png" });
+        await fs.rm((await library.get("image:repair")).filePath);
+        await library.put("image:repair", Buffer.from("same"), { mimeType: "image/png" });
+        assert.strictEqual(await fs.readFile((await library.get("image:repair")).filePath, "utf8"), "same");
+    });
+});
+
+test("Range 解析支持完整、开放与后缀范围", () => {
+    assert.deepStrictEqual(parseRange("bytes=2-5", 10), { start: 2, end: 5 });
+    assert.deepStrictEqual(parseRange("bytes=6-", 10), { start: 6, end: 9 });
+    assert.deepStrictEqual(parseRange("bytes=-3", 10), { start: 7, end: 9 });
+    assert.strictEqual(parseRange("bytes=20-30", 10), false);
+});

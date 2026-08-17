@@ -6,8 +6,10 @@ const { app, BrowserWindow, Menu, net, protocol, session, shell, dialog } = requ
 const { buildCorsResponse, corsHeaderEntries, shouldInterceptUrl } = require("./src/cors");
 const { isExternalUrl } = require("./src/external-navigation");
 const { resolveAppAssetPath } = require("./src/app-protocol");
+const { MediaLibrary } = require("./src/media-library");
+const { createMediaProtocolHandler } = require("./src/media-protocol");
 const { relayDecision, relayRequest } = require("./src/relay");
-const { resolveDistDir, resolveUserDataDir } = require("./src/paths");
+const { resolveDistDir, resolveLibraryDir, resolveUserDataDir } = require("./src/paths");
 
 const APP_SCHEME = "app";
 // 主机名 canvas 构成 origin，不可更改：改动后 IndexedDB 视为不同来源，画布与素材将全部读不到
@@ -33,6 +35,8 @@ const DIST_DIR = resolveDistDir({
     resourcesPath: process.resourcesPath,
     appDir: __dirname,
 });
+const mediaLibrary = new MediaLibrary(resolveLibraryDir(app.getPath("userData")));
+const handleMediaRequest = createMediaProtocolHandler({ library: mediaLibrary, shell });
 
 function registerCorsInterceptor() {
     session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
@@ -56,7 +60,9 @@ function registerCorsInterceptor() {
 }
 
 function registerAppProtocol() {
-    protocol.handle(APP_SCHEME, (request) => {
+    protocol.handle(APP_SCHEME, async (request) => {
+        const mediaResponse = await handleMediaRequest(request);
+        if (mediaResponse) return mediaResponse;
         const { pathname } = new URL(request.url);
         const filePath = resolveAppAssetPath(pathname, DIST_DIR);
         return net.fetch(pathToFileURL(filePath).toString());

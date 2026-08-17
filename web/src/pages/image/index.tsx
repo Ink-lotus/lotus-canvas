@@ -6,17 +6,20 @@ import { saveAs } from "file-saver";
 import { useTranslation } from "react-i18next";
 
 import { ImageSettingsPanel } from "@/components/image-settings-panel";
-import { ModelPicker } from "@/components/model-picker";
+import { ImageModelTargetPicker } from "@/components/image-model-target-picker";
+import { DesktopMediaActions } from "@/components/desktop-media-actions";
 import { PromptSelectDialog } from "@/components/prompts/prompt-select-dialog";
 import { AssetPickerModal, type InsertAssetPayload } from "@/components/canvas/asset-picker-modal";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { imageReferenceLabel } from "@/lib/image-reference-prompt";
-import { modelOptionLabel, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
+import { modelOptionLabel, normalizeImageModelTargets, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { nanoid } from "nanoid";
 import { formatBytes, formatDuration, getDataUrlByteSize, readImageMeta } from "@/lib/image-utils";
 import { requestEdit, requestGeneration } from "@/services/api/image";
-import { deleteStoredImages, resolveImageUrl, uploadImage } from "@/services/image-storage";
+import { scheduleImageGeneration } from "@/services/api/image-generation-scheduler";
+import { isDesktopMediaLibrary } from "@/services/desktop-media-storage";
+import { resolveImageUrl, uploadImage } from "@/services/image-storage";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { useWorkbenchAgentStore } from "@/stores/use-workbench-agent-store";
 import type { ReferenceImage } from "@/types/image";
@@ -31,6 +34,7 @@ type GeneratedImage = {
     height: number;
     bytes: number;
     mimeType?: string;
+    model: string;
 };
 
 type GenerationResult = {
@@ -60,7 +64,7 @@ type GenerationLog = {
     thumbnails: string[];
 };
 
-type GenerationLogConfig = Pick<AiConfig, "model" | "imageModel" | "quality" | "size" | "count">;
+type GenerationLogConfig = Pick<AiConfig, "model" | "imageModel" | "imageModelTargets" | "quality" | "size" | "count">;
 
 type UpdateAiConfig = <K extends keyof AiConfig>(key: K, value: AiConfig[K]) => void;
 
@@ -76,9 +80,11 @@ export default function ImagePage() {
     const config = useConfigStore((state) => state.config);
     const effectiveConfig = useEffectiveConfig();
     const updateConfig = useConfigStore((state) => state.updateConfig);
+    const setImageModelTargets = useConfigStore((state) => state.setImageModelTargets);
     const isAiConfigReady = useConfigStore((state) => state.isAiConfigReady);
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const addAsset = useAssetStore((state) => state.addAsset);
+    const cleanupAssets = useAssetStore((state) => state.cleanupImages);
     const [prompt, setPrompt] = useState("");
     const [references, setReferences] = useState<ReferenceImage[]>([]);
     const [results, setResults] = useState<GenerationResult[]>([]);
@@ -101,7 +107,8 @@ export default function ImagePage() {
     const processedCommandRef = useRef(0);
     const agentTaskIdRef = useRef<string | undefined>(undefined);
 
-    const model = effectiveConfig.imageModel || effectiveConfig.model;
+    const modelTargets = normalizeImageModelTargets(effectiveConfig.imageModel, effectiveConfig.imageModelTargets, effectiveConfig.channels);
+    const model = modelTargets[0] || effectiveConfig.imageModel || effectiveConfig.model;
     const canGenerate = Boolean(prompt.trim());
     const generationCount = Math.max(1, Math.min(10, Number(config.count) || 1));
 
@@ -190,15 +197,18 @@ export default function ImagePage() {
         try {
             const logImages = await Promise.all(
                 successImages.map(async (image) => {
+                    if (image.storageKey) return image;
                     const stored = await uploadImage(image.dataUrl);
                     return { ...image, dataUrl: stored.url, storageKey: stored.storageKey, width: stored.width, height: stored.height, bytes: stored.bytes, mimeType: stored.mimeType };
                 }),
             );
+            const storedById = new Map(logImages.map((image) => [image.id, image]));
+            setResults((value) => value.map((item) => (item.image ? { ...item, image: storedById.get(item.image.id) || item.image } : item)));
             saveLog(
                 buildLog({
                     prompt: text,
                     model,
-                    config: { ...snapshot.config, count: String(generationCount) },
+                    config: { ...snapshot.config, count: String(generationCount), imageModelTargets: snapshot.targets },
                     references: snapshot.references,
                     durationMs: performance.now() - batchStartedAt,
                     successCount,
@@ -240,13 +250,15 @@ export default function ImagePage() {
     };
 
     const addResultToReferences = async (image: GeneratedImage, index: number) => {
-        const stored = await uploadImage(image.dataUrl);
+        const stored = image.storageKey ? { url: image.dataUrl, storageKey: image.storageKey, mimeType: image.mimeType || "image/png" } : await uploadImage(image.dataUrl);
         setReferences((value) => [...value, { id: nanoid(), name: `result-${index + 1}.png`, type: stored.mimeType, dataUrl: stored.url, storageKey: stored.storageKey }]);
         message.success(t("imageWorkbench.addedReference"));
     };
 
     const saveResultToAssets = async (image: GeneratedImage, index: number) => {
-        const stored = await uploadImage(image.dataUrl);
+        const stored = image.storageKey
+            ? { url: image.dataUrl, storageKey: image.storageKey, width: image.width, height: image.height, bytes: image.bytes, mimeType: image.mimeType || "image/png" }
+            : await uploadImage(image.dataUrl);
         addAsset({
             kind: "image",
             title: t("imageWorkbench.resultTitle", { count: index + 1 }),
@@ -279,12 +291,16 @@ export default function ImagePage() {
         setStartedAt(0);
         setSelectedLogIds([]);
         setPreviewLog(null);
+        cleanupAssets();
     };
 
     const deleteSelectedLogs = () => {
-        const imageKeys = logs.filter((log) => selectedLogIds.includes(log.id)).flatMap((log) => log.images.map((image) => image.storageKey).filter((key): key is string => Boolean(key)));
-        void Promise.all([deleteStoredImages(imageKeys), ...selectedLogIds.map((id) => logStore.removeItem(id))]).then(refreshLogs);
-        if (previewLog && selectedLogIds.includes(previewLog.id)) {
+        const deletingPreview = Boolean(previewLog && selectedLogIds.includes(previewLog.id));
+        void Promise.all(selectedLogIds.map((id) => logStore.removeItem(id))).then(async () => {
+            await refreshLogs();
+            cleanupAssets({ references, results: deletingPreview ? [] : results });
+        });
+        if (deletingPreview) {
             setPreviewLog(null);
             setResults([]);
         }
@@ -303,7 +319,8 @@ export default function ImagePage() {
         setLogsOpen(false);
         setPrompt(log.prompt);
         setReferences(log.references || []);
-        if (log.config.imageModel || log.model) updateConfig("imageModel", log.config.imageModel || log.model);
+        if (log.config.imageModelTargets?.length) setImageModelTargets(log.config.imageModelTargets);
+        else if (log.config.imageModel || log.model) updateConfig("imageModel", log.config.imageModel || log.model);
         if (log.config.quality) updateConfig("quality", log.config.quality);
         if (log.config.size) updateConfig("size", log.config.size);
         if (log.config.count) updateConfig("count", log.config.count);
@@ -316,22 +333,26 @@ export default function ImagePage() {
             message.error(t("imageWorkbench.promptRequired"));
             return null;
         }
-        if (!isAiConfigReady(effectiveConfig, model)) {
+        if (!modelTargets.length || modelTargets.some((target) => !isAiConfigReady(effectiveConfig, target))) {
             message.warning(t("workbench.configFirst"));
             openConfigDialog(true);
             return null;
         }
-        return { text, config: { ...effectiveConfig, model, count: "1" }, references: [...references] };
+        return { text, config: { ...effectiveConfig, model, imageModel: model, imageModelTargets: modelTargets, count: "1" }, targets: modelTargets, references: [...references] };
     };
 
-    const runGenerationSlot = async (index: number, snapshot: { text: string; config: AiConfig; references: ReferenceImage[] }) => {
+    const runGenerationSlot = async (index: number, snapshot: { text: string; config: AiConfig; targets: string[]; references: ReferenceImage[] }) => {
         const itemStartedAt = performance.now();
         try {
-            const result = snapshot.references.length ? await requestEdit(snapshot.config, snapshot.text, snapshot.references) : await requestGeneration(snapshot.config, snapshot.text);
+            const scheduled = await scheduleImageGeneration(snapshot.config, snapshot.targets, async (target) => {
+                const requestConfig = { ...snapshot.config, model: target, imageModel: target };
+                return snapshot.references.length ? requestEdit(requestConfig, snapshot.text, snapshot.references) : requestGeneration(requestConfig, snapshot.text);
+            });
+            const result = scheduled.value;
             const image = result[0];
             if (!image) throw new Error(t("imageWorkbench.missingResult"));
             const meta = await readImageMeta(image.dataUrl);
-            const nextImage = { id: image.id, dataUrl: image.dataUrl, durationMs: performance.now() - itemStartedAt, width: meta.width, height: meta.height, bytes: getDataUrlByteSize(image.dataUrl) };
+            const nextImage = { id: image.id, dataUrl: image.dataUrl, durationMs: performance.now() - itemStartedAt, width: meta.width, height: meta.height, bytes: getDataUrlByteSize(image.dataUrl), model: scheduled.target };
             setResults((value) => updateResultAt(value, index, { status: "success", image: nextImage }));
             return nextImage;
         } catch (error) {
@@ -348,14 +369,14 @@ export default function ImagePage() {
         const retryStartedAt = performance.now();
         try {
             const image = await runGenerationSlot(index, snapshot);
-            const stored = await uploadImage(image.dataUrl);
-            const logImage = { ...image, dataUrl: stored.url, storageKey: stored.storageKey, width: stored.width, height: stored.height, bytes: stored.bytes, mimeType: stored.mimeType };
-            setResults((value) => updateResultAt(value, index, { image: { ...image, dataUrl: stored.url, storageKey: stored.storageKey } }));
+            const stored = image.storageKey ? null : await uploadImage(image.dataUrl);
+            const logImage = stored ? { ...image, dataUrl: stored.url, storageKey: stored.storageKey, width: stored.width, height: stored.height, bytes: stored.bytes, mimeType: stored.mimeType } : image;
+            setResults((value) => updateResultAt(value, index, { image: logImage }));
             saveLog(
                 buildLog({
                     prompt: snapshot.text,
                     model,
-                    config: { ...snapshot.config, count: "1" },
+                    config: { ...snapshot.config, count: "1", imageModelTargets: snapshot.targets },
                     references: snapshot.references,
                     durationMs: performance.now() - retryStartedAt,
                     successCount: 1,
@@ -488,7 +509,7 @@ export default function ImagePage() {
                             </div>
 
                             <div className="hidden gap-4 sm:grid sm:grid-cols-2">
-                                <GenerationSettings config={effectiveConfig} model={model} updateConfig={updateConfig} openConfigDialog={openConfigDialog} />
+                                <GenerationSettings config={effectiveConfig} targets={modelTargets} onTargetsChange={setImageModelTargets} updateConfig={updateConfig} openConfigDialog={openConfigDialog} />
                             </div>
                         </div>
 
@@ -551,7 +572,7 @@ export default function ImagePage() {
             </Drawer>
             <Drawer title={t("workbench.settings")} placement="bottom" size="82vh" open={settingsOpen} onClose={() => setSettingsOpen(false)}>
                 <div className="grid grid-cols-2 gap-3 pb-4">
-                    <GenerationSettings config={effectiveConfig} model={model} updateConfig={updateConfig} openConfigDialog={openConfigDialog} />
+                    <GenerationSettings config={effectiveConfig} targets={modelTargets} onTargetsChange={setImageModelTargets} updateConfig={updateConfig} openConfigDialog={openConfigDialog} />
                 </div>
             </Drawer>
             <PromptSelectDialog open={promptDialogOpen} onOpenChange={setPromptDialogOpen} onSelect={setPrompt} />
@@ -563,7 +584,7 @@ export default function ImagePage() {
     );
 }
 
-function GenerationSettings({ config, model, updateConfig, openConfigDialog }: { config: AiConfig; model: string; updateConfig: UpdateAiConfig; openConfigDialog: (shouldPromptContinue?: boolean) => void }) {
+function GenerationSettings({ config, targets, onTargetsChange, updateConfig, openConfigDialog }: { config: AiConfig; targets: string[]; onTargetsChange: (targets: string[]) => void; updateConfig: UpdateAiConfig; openConfigDialog: (shouldPromptContinue?: boolean) => void }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const { t } = useTranslation();
 
@@ -571,7 +592,7 @@ function GenerationSettings({ config, model, updateConfig, openConfigDialog }: {
         <>
             <label className="col-span-2 block min-w-0 sm:col-span-1">
                 <span className="mb-1.5 block text-sm font-semibold sm:mb-2 sm:text-base">{t("workbench.model")}</span>
-                <ModelPicker config={config} value={model} onChange={(value) => updateConfig("imageModel", value)} capability="image" fullWidth onMissingConfig={() => openConfigDialog(false)} />
+                <ImageModelTargetPicker config={config} value={targets} onChange={onTargetsChange} fullWidth onMissingConfig={() => openConfigDialog(false)} />
             </label>
             <div className="col-span-2">
                 <ImageSettingsPanel config={config} onConfigChange={(key, value) => updateConfig(key, value)} theme={theme} showTitle={false} className="space-y-4" maxCount={10} />
@@ -594,16 +615,20 @@ function ResultImageCard({
     onSaveAsset: (image: GeneratedImage, index: number) => void;
 }) {
     const { t } = useTranslation();
+    const downloadLabel = t(isDesktopMediaLibrary() ? "common.exportCopy" : "common.download");
     return (
         <div className="overflow-hidden rounded-lg border border-stone-200 bg-background dark:border-stone-800">
             <Image src={image.dataUrl} alt={t("imageWorkbench.resultAlt", { count: index + 1 })} className="aspect-square object-cover" />
             <div className="space-y-2 border-t border-stone-200 px-3 py-2.5 dark:border-stone-800">
-                <div className="flex min-w-0 gap-x-2 gap-y-1 text-xs text-stone-500 dark:text-stone-400">
-                    <span>
-                        {image.width}x{image.height}
-                    </span>
-                    <span>{formatBytes(image.bytes)}</span>
-                    <span>{formatDuration(image.durationMs)}</span>
+                <div className="flex min-w-0 items-center justify-between gap-2 text-xs text-stone-500 dark:text-stone-400">
+                    <div className="flex min-w-0 gap-x-2 gap-y-1">
+                        <span>
+                            {image.width}x{image.height}
+                        </span>
+                        <span>{formatBytes(image.bytes)}</span>
+                        <span>{formatDuration(image.durationMs)}</span>
+                    </div>
+                    <DesktopMediaActions storageKey={image.storageKey} />
                 </div>
                 <div className="grid min-w-0 grid-cols-3 gap-2">
                     <Tooltip title={t("common.addToAssets")}>
@@ -616,9 +641,9 @@ function ResultImageCard({
                             {t("imageWorkbench.addReference")}
                         </Button>
                     </Tooltip>
-                    <Tooltip title={t("common.download")}>
+                    <Tooltip title={downloadLabel}>
                         <Button className={RESULT_ACTION_BUTTON_CLASS} size="small" icon={<Download className="size-3.5" />} onClick={() => onDownload(image, index)}>
-                            {t("common.download")}
+                            {downloadLabel}
                         </Button>
                     </Tooltip>
                 </div>
@@ -791,6 +816,7 @@ async function readStoredLogs() {
 }
 
 async function normalizeLog(log: Partial<GenerationLog>): Promise<GenerationLog> {
+    const config = normalizeLogConfig(log);
     const references = await Promise.all(
         (log.references || []).map(async (item) => ({
             ...item,
@@ -800,10 +826,10 @@ async function normalizeLog(log: Partial<GenerationLog>): Promise<GenerationLog>
     const images = await Promise.all(
         (log.images || []).map(async (item) => ({
             ...item,
+            model: item.model || log.model || config.imageModel,
             dataUrl: await resolveImageUrl(item.storageKey, item.dataUrl),
         })),
     );
-    const config = normalizeLogConfig(log);
     return {
         id: log.id || nanoid(),
         createdAt: log.createdAt || Date.now(),
@@ -838,6 +864,7 @@ function normalizeLogConfig(log: Partial<GenerationLog>): GenerationLogConfig {
     return {
         model: log.config?.model || log.model || "",
         imageModel: log.config?.imageModel || log.model || "",
+        imageModelTargets: log.config?.imageModelTargets?.length ? log.config.imageModelTargets : [log.config?.imageModel || log.model || ""].filter(Boolean),
         quality: log.config?.quality || log.quality || "",
         size: log.config?.size || log.size || "",
         count: log.config?.count || String(log.imageCount || log.successCount || 1),
@@ -886,6 +913,7 @@ function buildLog({
     const logConfig = {
         model: config.model,
         imageModel: config.imageModel,
+        imageModelTargets: config.imageModelTargets,
         quality: config.quality,
         size: config.size,
         count: config.count,

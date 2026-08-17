@@ -6,6 +6,7 @@ import { saveAs } from "file-saver";
 import { useTranslation } from "react-i18next";
 
 import { requestEdit, requestGeneration, requestImageQuestion } from "@/services/api/image";
+import { scheduleImageGeneration } from "@/services/api/image-generation-scheduler";
 import { requestAudioGeneration, storeGeneratedAudio } from "@/services/api/audio";
 import { requestVideoGeneration, storeGeneratedVideo } from "@/services/api/video";
 import { defaultConfig, useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
@@ -1476,6 +1477,7 @@ function InfiniteCanvasPage() {
                         naturalHeight: image.naturalHeight,
                         bytes: image.bytes,
                         mimeType: image.mimeType,
+                        model: image.model || node.metadata?.model,
                         primaryImageId: image.id,
                     },
                 };
@@ -1505,7 +1507,8 @@ function InfiniteCanvasPage() {
                 status: NODE_STATUS_SUCCESS,
                 prompt: node.metadata?.prompt,
                 generationType: node.metadata?.generationType,
-                model: node.metadata?.model,
+                model: image.model || node.metadata?.model,
+                imageModelTargets: node.metadata?.imageModelTargets,
                 size: node.metadata?.size,
                 quality: node.metadata?.quality,
                 background: node.metadata?.background,
@@ -1698,7 +1701,7 @@ function InfiniteCanvasPage() {
         async (node: CanvasNodeData, payload: CanvasImageMaskEditPayload) => {
             if (!node.metadata?.content) return;
             const generationConfig = { ...buildGenerationConfig(effectiveConfig, node, "image"), count: "1", size: node.metadata?.size || "auto" };
-            if (!isAiConfigReady(generationConfig, generationConfig.model)) {
+            if (!isAiConfigReady(generationConfig, generationConfig.model) || (mode === "image" && generationConfig.imageModelTargets.some((target) => !isAiConfigReady(generationConfig, target)))) {
                 openConfigDialog(true);
                 return;
             }
@@ -2038,12 +2041,19 @@ function InfiniteCanvasPage() {
                             ? [{ id: up.id, name: `${up.title || up.id}.png`, type: up.metadata.mimeType || "image/png", dataUrl: up.metadata.content, storageKey: up.metadata.storageKey }]
                             : [],
                     );
-                    const image = refs.length
-                        ? await requestEdit({ ...generationConfig, count: "1" }, fullPrompt, refs, undefined, { signal: controller.signal }).then((items) => items[0])
-                        : await requestGeneration({ ...generationConfig, count: "1" }, fullPrompt, { signal: controller.signal }).then((items) => items[0]);
+                    const scheduled = await scheduleImageGeneration(
+                        generationConfig,
+                        generationConfig.imageModelTargets,
+                        (target) => {
+                            const requestConfig = { ...generationConfig, model: target, imageModel: target, count: "1" };
+                            return refs.length ? requestEdit(requestConfig, fullPrompt, refs, undefined, { signal: controller.signal }) : requestGeneration(requestConfig, fullPrompt, { signal: controller.signal });
+                        },
+                        controller.signal,
+                    );
+                    const image = scheduled.value[0];
                     const uploaded = await uploadImage(image.dataUrl);
                     setNodes((prev) =>
-                        prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, ...imageMetadata(uploaded), prompt: scene, model: generationConfig.model, status: NODE_STATUS_SUCCESS, errorDetails: undefined } } : node)),
+                        prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, ...imageMetadata(uploaded), prompt: scene, model: scheduled.target, imageModelTargets: generationConfig.imageModelTargets, status: NODE_STATUS_SUCCESS, errorDetails: undefined } } : node)),
                     );
                     setDialogNodeId(null);
                 } catch (error) {
@@ -2163,12 +2173,19 @@ function InfiniteCanvasPage() {
                     await Promise.all(
                         imageIds.map(async (imageId) => {
                             try {
-                                const image = referenceImages.length
-                                    ? await requestEdit({ ...generationConfig, count: "1" }, effectivePrompt, referenceImages, undefined, { signal: controller.signal }).then((items) => items[0])
-                                    : await requestGeneration({ ...generationConfig, count: "1" }, effectivePrompt, { signal: controller.signal }).then((items) => items[0]);
+                                const scheduled = await scheduleImageGeneration(
+                                    generationConfig,
+                                    generationConfig.imageModelTargets,
+                                    (target) => {
+                                        const requestConfig = { ...generationConfig, model: target, imageModel: target, count: "1" };
+                                        return referenceImages.length ? requestEdit(requestConfig, effectivePrompt, referenceImages, undefined, { signal: controller.signal }) : requestGeneration(requestConfig, effectivePrompt, { signal: controller.signal });
+                                    },
+                                    controller.signal,
+                                );
+                                const image = scheduled.value[0];
                                 const uploaded = await uploadImage(image.dataUrl);
                                 const imageSize = fitNodeSize(uploaded.width, uploaded.height, imageConfig.width, imageConfig.height);
-                                const item: CanvasNodeImage = { id: imageId, status: NODE_STATUS_SUCCESS, content: uploaded.url, storageKey: uploaded.storageKey, naturalWidth: uploaded.width, naturalHeight: uploaded.height, bytes: uploaded.bytes, mimeType: uploaded.mimeType };
+                                const item: CanvasNodeImage = { id: imageId, status: NODE_STATUS_SUCCESS, content: uploaded.url, storageKey: uploaded.storageKey, naturalWidth: uploaded.width, naturalHeight: uploaded.height, bytes: uploaded.bytes, mimeType: uploaded.mimeType, model: scheduled.target };
                                 setNodes((prev) =>
                                     prev.map((node) => {
                                         if (node.id !== rootId) return node;
@@ -2187,6 +2204,7 @@ function InfiniteCanvasPage() {
                                                 naturalHeight: item.naturalHeight,
                                                 bytes: item.bytes,
                                                 mimeType: item.mimeType,
+                                                model: item.model,
                                                 images,
                                                 primaryImageId: imageId,
                                             },
@@ -2416,13 +2434,14 @@ function InfiniteCanvasPage() {
                     ? {
                           ...effectiveConfig,
                           model: savedImageMetadata.model || effectiveConfig.imageModel || effectiveConfig.model,
+                          imageModelTargets: savedImageMetadata.imageModelTargets?.length ? savedImageMetadata.imageModelTargets : [savedImageMetadata.model || effectiveConfig.imageModel || effectiveConfig.model],
                           quality: savedImageMetadata.quality || effectiveConfig.quality,
                           size: savedImageMetadata.size || effectiveConfig.size,
                           background: savedImageMetadata.background ?? effectiveConfig.background,
                           count: "1",
                       }
                     : { ...buildGenerationConfig(effectiveConfig, sourceNode, node.type === CanvasNodeType.Text ? "text" : node.type === CanvasNodeType.Video ? "video" : node.type === CanvasNodeType.Audio ? "audio" : "image"), count: "1" };
-            if (!isAiConfigReady(generationConfig, generationConfig.model)) {
+            if (!isAiConfigReady(generationConfig, generationConfig.model) || (node.type === CanvasNodeType.Image && generationConfig.imageModelTargets.some((target) => !isAiConfigReady(generationConfig, target)))) {
                 openConfigDialog(true);
                 return;
             }
@@ -2498,9 +2517,16 @@ function InfiniteCanvasPage() {
                     return;
                 }
 
-                const image = useReferenceImages
-                    ? await requestEdit(generationConfig, prompt, retryImages, undefined, { signal: controller.signal }).then((items) => items[0])
-                    : await requestGeneration(generationConfig, prompt, { signal: controller.signal }).then((items) => items[0]);
+                const scheduled = await scheduleImageGeneration(
+                    generationConfig,
+                    generationConfig.imageModelTargets,
+                    (target) => {
+                        const requestConfig = { ...generationConfig, model: target, imageModel: target };
+                        return useReferenceImages ? requestEdit(requestConfig, prompt, retryImages, undefined, { signal: controller.signal }) : requestGeneration(requestConfig, prompt, { signal: controller.signal });
+                    },
+                    controller.signal,
+                );
+                const image = scheduled.value[0];
                 const uploadedImage = await uploadImage(image.dataUrl);
                 const imageConfig = NODE_DEFAULT_SIZE[CanvasNodeType.Image];
                 const retryImage: CanvasNodeImage = {
@@ -2512,11 +2538,13 @@ function InfiniteCanvasPage() {
                     naturalHeight: uploadedImage.height,
                     bytes: uploadedImage.bytes,
                     mimeType: uploadedImage.mimeType,
+                    model: scheduled.target,
                 };
                 const generationMetadata = savedImageMetadata?.generationType
                     ? {
                           generationType: savedImageMetadata.generationType,
-                          model: generationConfig.model,
+                          model: scheduled.target,
+                          imageModelTargets: generationConfig.imageModelTargets,
                           size: generationConfig.size,
                           quality: generationConfig.quality,
                           ...(generationConfig.background ? { background: generationConfig.background } : {}),

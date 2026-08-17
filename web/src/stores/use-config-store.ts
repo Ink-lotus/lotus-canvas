@@ -21,6 +21,7 @@ export type ModelChannel = {
     baseUrl: string;
     apiKey: string;
     apiFormat: ApiCallFormat;
+    maxConcurrency: number;
     models: ChannelModel[];
 };
 
@@ -32,6 +33,7 @@ export type AiConfig = {
     channels: ModelChannel[];
     model: string;
     imageModel: string;
+    imageModelTargets: string[];
     videoModel: string;
     textModel: string;
     audioModel: string;
@@ -80,6 +82,7 @@ export const defaultConfig: AiConfig = {
             baseUrl: OPENAI_BASE_URL,
             apiKey: "",
             apiFormat: "openai",
+            maxConcurrency: 1,
             models: [
                 { name: "gpt-image-2", capability: "image" },
                 { name: "grok-imagine-video", capability: "video" },
@@ -90,6 +93,7 @@ export const defaultConfig: AiConfig = {
     ],
     model: "default::gpt-image-2",
     imageModel: "default::gpt-image-2",
+    imageModelTargets: ["default::gpt-image-2"],
     videoModel: "default::grok-imagine-video",
     textModel: "default::gpt-5.5",
     audioModel: "default::gpt-4o-mini-tts",
@@ -126,6 +130,7 @@ type ConfigStore = {
     configTab: ConfigTabKey;
     shouldPromptContinue: boolean;
     updateConfig: <K extends keyof AiConfig>(key: K, value: AiConfig[K]) => void;
+    setImageModelTargets: (targets: string[]) => void;
     updateWebdavConfig: <K extends keyof WebdavSyncConfig>(key: K, value: WebdavSyncConfig[K]) => void;
     isAiConfigReady: (config: AiConfig, model: string) => boolean;
     openConfigDialog: (shouldPromptContinue?: boolean, tab?: ConfigTabKey) => void;
@@ -199,8 +204,14 @@ export const useConfigStore = create<ConfigStore>()(
                     config: {
                         ...state.config,
                         [key]: value,
+                        ...(key === "imageModel" ? { imageModelTargets: [String(value)] } : {}),
                     },
                 })),
+            setImageModelTargets: (targets) =>
+                set((state) => {
+                    const imageModelTargets = normalizeImageModelTargets(targets[0] || state.config.imageModel, targets, state.config.channels);
+                    return { config: { ...state.config, imageModel: imageModelTargets[0] || "", imageModelTargets } };
+                }),
             updateWebdavConfig: (key, value) =>
                 set((state) => ({
                     webdav: {
@@ -224,6 +235,7 @@ export const useConfigStore = create<ConfigStore>()(
                 if (!Array.isArray(persistedConfig.channels)) config.channels = [];
                 const channels = normalizeChannels(config);
                 const models = modelOptionsFromChannels(channels);
+                const imageModel = normalizeModelOptionValue(config.imageModel || config.model, channels);
                 return {
                     ...current,
                     webdav: { ...defaultWebdavSyncConfig, ...persistedWebdav },
@@ -233,7 +245,8 @@ export const useConfigStore = create<ConfigStore>()(
                         apiFormat: normalizeApiFormat(config.apiFormat),
                         channels,
                         models,
-                        imageModel: normalizeModelOptionValue(config.imageModel || config.model, channels),
+                        imageModel,
+                        imageModelTargets: normalizeImageModelTargets(imageModel, config.imageModelTargets, channels),
                         videoModel: normalizeModelOptionValue(config.videoModel, channels),
                         textModel: normalizeModelOptionValue(config.textModel || config.model, channels),
                         audioModel: normalizeModelOptionValue(config.audioModel || defaultConfig.audioModel, channels),
@@ -282,6 +295,7 @@ export function createModelChannel(channel?: Partial<ModelChannel>): ModelChanne
         baseUrl: channel?.baseUrl?.trim() || defaultBaseUrlForApiFormat(apiFormat),
         apiKey: channel?.apiKey || "",
         apiFormat,
+        maxConcurrency: normalizeChannelConcurrency(channel?.maxConcurrency),
         models: normalizeChannelModels(channel?.models),
     };
 }
@@ -343,6 +357,26 @@ export function resolveModelRequestConfig(config: AiConfig, value: string) {
         apiKey: channel.apiKey,
         apiFormat: channel.apiFormat,
     };
+}
+
+export function normalizeImageModelTargets(primary: string, targets: string[] | undefined, channels: ModelChannel[]) {
+    const normalizedPrimary = normalizeModelOptionValue(primary, channels);
+    if (!normalizedPrimary) return [];
+    const modelName = modelOptionName(normalizedPrimary);
+    return Array.from(
+        new Set(
+            [normalizedPrimary, ...(Array.isArray(targets) ? targets : [])].filter((value) => {
+                const decoded = decodeChannelModel(value);
+                if (!decoded || decoded.model !== modelName) return false;
+                const channel = channels.find((item) => item.id === decoded.channelId);
+                return channel?.models.some((model) => model.name === modelName && model.capability === "image");
+            }),
+        ),
+    );
+}
+
+export function normalizeChannelConcurrency(value: unknown) {
+    return Math.max(1, Math.min(20, Math.floor(Math.abs(Number(value)) || 1)));
 }
 
 function normalizeChannels(config: AiConfig) {

@@ -16,4 +16,8 @@ function resolveUserDataDir({ isPackaged, exePath, appDir }) {
     return isPackaged ? path.join(path.dirname(exePath), "data") : path.join(appDir, "data");
 }
 
-module.exports = { resolveDistDir, resolveUserDataDir };
+function resolveLibraryDir(userDataDir) {
+    return path.join(userDataDir, "library");
+}
+
+module.exports = { resolveDistDir, resolveUserDataDir, resolveLibraryDir };

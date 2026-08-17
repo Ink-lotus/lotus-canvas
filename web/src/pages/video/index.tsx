@@ -7,15 +7,17 @@ import { saveAs } from "file-saver";
 import { useTranslation } from "react-i18next";
 
 import { AssetPickerModal, type InsertAssetPayload } from "@/components/canvas/asset-picker-modal";
+import { DesktopMediaActions } from "@/components/desktop-media-actions";
 import { ModelPicker } from "@/components/model-picker";
 import { PromptSelectDialog } from "@/components/prompts/prompt-select-dialog";
 import { VideoSettingsPanel, normalizeVideoResolutionValue, normalizeVideoSizeValue, videoSizeLabel } from "@/components/video-settings-panel";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { formatBytes, formatDuration } from "@/lib/image-utils";
 import { boolConfig, isSeedanceVideoConfig, normalizeSeedanceRatio, seedanceReferenceLabel, seedanceVideoReferenceError, seedanceVideoReferenceHint, SEEDANCE_REFERENCE_LIMITS, SEEDANCE_VIDEO_MIME_TYPES } from "@/lib/seedance-video";
-import { deleteStoredMedia, resolveMediaUrl, uploadMediaFile } from "@/services/file-storage";
+import { resolveMediaUrl, uploadMediaFile } from "@/services/file-storage";
 import { resolveImageUrl, uploadImage } from "@/services/image-storage";
 import { createVideoGenerationTask, pollVideoGenerationTask, storeGeneratedVideo, type VideoGenerationTask } from "@/services/api/video";
+import { isDesktopMediaLibrary } from "@/services/desktop-media-storage";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { useWorkbenchAgentStore } from "@/stores/use-workbench-agent-store";
 import { modelOptionLabel, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
@@ -82,6 +84,7 @@ export default function VideoPage() {
     const isAiConfigReady = useConfigStore((state) => state.isAiConfigReady);
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const addAsset = useAssetStore((state) => state.addAsset);
+    const cleanupAssets = useAssetStore((state) => state.cleanupImages);
     const [prompt, setPrompt] = useState("");
     const [references, setReferences] = useState<ReferenceImage[]>([]);
     const [videoReferences, setVideoReferences] = useState<ReferenceVideo[]>([]);
@@ -309,15 +312,16 @@ export default function VideoPage() {
         setStartedAt(0);
         setSelectedLogIds([]);
         setPreviewLog(null);
+        cleanupAssets();
     };
 
     const deleteSelectedLogs = () => {
-        const mediaKeys = logs
-            .filter((log) => selectedLogIds.includes(log.id))
-            .map((log) => log.video?.storageKey)
-            .filter((key): key is string => Boolean(key));
-        void Promise.all([deleteStoredMedia(mediaKeys), ...selectedLogIds.map((id) => logStore.removeItem(id))]).then(() => refreshLogs());
-        if (previewLog && selectedLogIds.includes(previewLog.id)) {
+        const deletingPreview = Boolean(previewLog && selectedLogIds.includes(previewLog.id));
+        void Promise.all(selectedLogIds.map((id) => logStore.removeItem(id))).then(async () => {
+            await refreshLogs();
+            cleanupAssets({ references, videoReferences, audioReferences, results: deletingPreview ? [] : results });
+        });
+        if (deletingPreview) {
             setPreviewLog(null);
             setResults([]);
         }
@@ -631,23 +635,27 @@ function GenerationSettings({ config, model, updateConfig, openConfigDialog }: {
 
 function ResultVideoCard({ video, onDownload, onSaveAsset }: { video: GeneratedVideo; onDownload: (video: GeneratedVideo) => void; onSaveAsset: (video: GeneratedVideo) => void }) {
     const { t } = useTranslation();
+    const downloadLabel = t(isDesktopMediaLibrary() ? "common.exportCopy" : "common.download");
     return (
         <div className="overflow-hidden rounded-lg border border-stone-200 bg-background dark:border-stone-800">
             <video src={video.url} controls className="aspect-video w-full bg-black object-contain" />
             <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-t border-stone-200 px-3 py-2.5 dark:border-stone-800">
-                <div className="flex min-w-0 flex-wrap gap-x-2 gap-y-1 text-xs text-stone-500 dark:text-stone-400">
-                    <span>
-                        {video.width}x{video.height}
-                    </span>
-                    <span>{formatBytes(video.bytes)}</span>
-                    <span>{formatDuration(video.durationMs)}</span>
+                <div className="flex min-w-0 items-center justify-between gap-2 text-xs text-stone-500 dark:text-stone-400">
+                    <div className="flex min-w-0 flex-wrap gap-x-2 gap-y-1">
+                        <span>
+                            {video.width}x{video.height}
+                        </span>
+                        <span>{formatBytes(video.bytes)}</span>
+                        <span>{formatDuration(video.durationMs)}</span>
+                    </div>
+                    <DesktopMediaActions storageKey={video.storageKey} />
                 </div>
                 <div className="flex shrink-0 gap-1">
                     <Button size="small" icon={<FolderPlus className="size-3.5" />} onClick={() => onSaveAsset(video)}>
                         {t("common.addToAssets")}
                     </Button>
                     <Button size="small" icon={<Download className="size-3.5" />} onClick={() => onDownload(video)}>
-                        {t("common.download")}
+                        {downloadLabel}
                     </Button>
                 </div>
             </div>

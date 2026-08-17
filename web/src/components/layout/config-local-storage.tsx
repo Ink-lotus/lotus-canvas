@@ -1,10 +1,12 @@
-import { Alert, Button, Progress, Spin } from "antd";
+import { Alert, App, Button, Progress, Spin } from "antd";
 import type { TFunction } from "i18next";
-import { Database, HardDrive, Layers3, RefreshCw } from "lucide-react";
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { CircleStop, Database, FolderOpen, HardDrive, Layers3, RefreshCw } from "lucide-react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
+import { isDesktopMediaLibrary, openDesktopMediaLibrary, readDesktopMediaStats, type DesktopMediaStats } from "@/services/desktop-media-storage";
 import { readLocalStorageUsage, type LocalStorageUsage } from "@/services/local-storage-usage";
+import { migrateLegacyMedia, readLegacyMediaSummary, type LegacyMediaSummary, type MediaMigrationProgress } from "@/services/media-migration";
 
 const storeLabelKeys: Record<string, string> = {
     app_state: "appState",
@@ -17,22 +19,36 @@ const storeLabelKeys: Record<string, string> = {
 };
 
 export function ConfigLocalStorage({ active }: { active: boolean }) {
+    const { message, modal } = App.useApp();
     const { t } = useTranslation();
     const [usage, setUsage] = useState<LocalStorageUsage | null>(null);
+    const [desktopStats, setDesktopStats] = useState<DesktopMediaStats | null>(null);
+    const [legacy, setLegacy] = useState<LegacyMediaSummary | null>(null);
+    const [migration, setMigration] = useState<MediaMigrationProgress | null>(null);
     const [loading, setLoading] = useState(false);
+    const [migrating, setMigrating] = useState(false);
     const [error, setError] = useState("");
+    const cancelMigrationRef = useRef(false);
+    const desktop = isDesktopMediaLibrary();
 
     const refresh = useCallback(async () => {
         setLoading(true);
         setError("");
         try {
-            setUsage(await readLocalStorageUsage());
+            const [nextUsage, nextDesktopStats, nextLegacy] = await Promise.all([
+                readLocalStorageUsage(),
+                desktop ? readDesktopMediaStats() : Promise.resolve(null),
+                desktop ? readLegacyMediaSummary() : Promise.resolve(null),
+            ]);
+            setUsage(nextUsage);
+            setDesktopStats(nextDesktopStats);
+            setLegacy(nextLegacy);
         } catch (reason) {
             setError(reason instanceof Error ? reason.message : t("config.localStorage.readFailed"));
         } finally {
             setLoading(false);
         }
-    }, [t]);
+    }, [desktop, t]);
 
     useEffect(() => {
         if (active && !usage) void refresh();
@@ -41,8 +57,78 @@ export function ConfigLocalStorage({ active }: { active: boolean }) {
     const indexedDbBytes = usage?.contentBytes ?? 0;
     const percent = usage ? Math.min(100, (usage.usage / usage.quota) * 100) : 0;
 
+    const confirmMigration = () => {
+        if (!legacy?.records || !desktopStats) return;
+        if (desktopStats.freeBytes !== null && desktopStats.freeBytes < legacy.maxBytes) {
+            message.error(t("config.localStorage.migration.noSpace"));
+            return;
+        }
+        modal.confirm({
+            title: t("config.localStorage.migration.confirmTitle"),
+            content: t("config.localStorage.migration.confirmDescription", { count: legacy.records, size: formatStorageBytes(legacy.bytes), path: desktopStats.rootPath }),
+            okText: t("config.localStorage.migration.start"),
+            cancelText: t("common.cancel"),
+            onOk: () => void runMigration(),
+        });
+    };
+
+    const openLibrary = async () => {
+        try {
+            await openDesktopMediaLibrary();
+        } catch (reason) {
+            message.error(reason instanceof Error ? reason.message : t("common.mediaActionFailed"));
+        }
+    };
+
+    const runMigration = async () => {
+        cancelMigrationRef.current = false;
+        setMigrating(true);
+        setMigration({ current: 0, total: legacy?.records || 0, migrated: 0, failed: 0, processedBytes: 0, totalBytes: legacy?.bytes || 0 });
+        try {
+            const result = await migrateLegacyMedia({ shouldCancel: () => cancelMigrationRef.current, onProgress: setMigration });
+            if (result.canceled) message.info(t("config.localStorage.migration.canceled"));
+            else if (result.failed) message.warning(t("config.localStorage.migration.partial", { migrated: result.migrated, failed: result.failed }));
+            else message.success(t("config.localStorage.migration.completed", { count: result.migrated }));
+            await refresh();
+        } catch (reason) {
+            message.error(reason instanceof Error ? reason.message : t("config.localStorage.migration.failed"));
+        } finally {
+            setMigrating(false);
+        }
+    };
+
     return (
         <div className="space-y-3">
+            {desktop && desktopStats ? (
+                <section className="rounded-lg border border-stone-200 p-4 dark:border-stone-800">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div className="min-w-0">
+                            <div className="flex items-center gap-2 text-sm font-semibold"><HardDrive className="size-4" />{t("config.localStorage.library.title")}</div>
+                            <div className="mt-1 break-all font-mono text-[11px] text-stone-500">{desktopStats.rootPath}</div>
+                        </div>
+                        <Button icon={<FolderOpen className="size-4" />} onClick={() => void openLibrary()}>{t("config.localStorage.library.open")}</Button>
+                    </div>
+                    <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                        <StorageMetric icon={<HardDrive className="size-4" />} label={t("config.localStorage.library.usage")} value={formatStorageBytes(desktopStats.bytes)} hint={t("config.localStorage.library.files", { count: desktopStats.files })} />
+                        <StorageMetric icon={<Layers3 className="size-4" />} label={t("config.localStorage.library.references")} value={String(desktopStats.records)} hint={t("config.localStorage.library.dedupHint")} />
+                        <StorageMetric icon={<Database className="size-4" />} label={t("config.localStorage.migration.legacy")} value={formatStorageBytes(legacy?.bytes || 0)} hint={legacy?.records ? t("config.localStorage.migration.pending", { count: legacy.records }) : t("config.localStorage.migration.done")} />
+                    </div>
+                    {migration ? (
+                        <div className="mt-4 rounded-md border border-stone-200 p-3 dark:border-stone-800">
+                            <div className="mb-2 flex items-center justify-between gap-3 text-xs text-stone-500">
+                                <span>{t("config.localStorage.migration.progress", { current: migration.current, total: migration.total })}</span>
+                                <span>{formatStorageBytes(migration.processedBytes)} / {formatStorageBytes(migration.totalBytes)}</span>
+                            </div>
+                            <Progress percent={migration.total ? Math.round((migration.current / migration.total) * 100) : 0} showInfo={false} />
+                            <div className="mt-2 text-xs text-stone-500">{t("config.localStorage.migration.summary", { migrated: migration.migrated, failed: migration.failed })}</div>
+                        </div>
+                    ) : null}
+                    <div className="mt-4 flex flex-wrap items-center gap-2">
+                        <Button type="primary" disabled={!legacy?.records || migrating} loading={migrating} onClick={confirmMigration}>{legacy?.records ? t("config.localStorage.migration.action") : t("config.localStorage.migration.done")}</Button>
+                        {migrating ? <Button icon={<CircleStop className="size-4" />} onClick={() => { cancelMigrationRef.current = true; }}>{t("config.localStorage.migration.cancel")}</Button> : null}
+                    </div>
+                </section>
+            ) : null}
             <section className="rounded-lg border border-stone-200 p-4 dark:border-stone-800">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>

@@ -1,9 +1,9 @@
-import { Button, Drawer, Input, Segmented, Select, Space } from "antd";
+import { Button, Drawer, Input, InputNumber, Segmented, Select, Space } from "antd";
 import { ListPlus, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { defaultBaseUrlForApiFormat, guessCapability, normalizeChannelModels, type ApiCallFormat, type ChannelModel, type ModelCapability, type ModelChannel } from "@/stores/use-config-store";
+import { defaultBaseUrlForApiFormat, guessCapability, normalizeChannelConcurrency, normalizeChannelModels, type ApiCallFormat, type ChannelModel, type ModelCapability, type ModelChannel } from "@/stores/use-config-store";
 import { ModelScriptEditor } from "./model-script-editor";
 import { ModelSelectModal } from "./model-select-modal";
 
@@ -81,6 +81,11 @@ export function ChannelEditorDrawer({ open, channel, onSave, onClose }: { open: 
                 <label className="block md:col-span-2">
                     <span className="mb-1 block text-sm font-medium">API Key</span>
                     <Input.Password value={draft.apiKey} onChange={(event) => patch({ apiKey: event.target.value })} placeholder="sk-..." />
+                </label>
+                <label className="block">
+                    <span className="mb-1 block text-sm font-medium">{t("config.channelEditor.maxConcurrency")}</span>
+                    <InputNumber className="w-full" min={1} max={20} precision={0} value={draft.maxConcurrency} onChange={(value) => patch({ maxConcurrency: normalizeChannelConcurrency(value) })} />
+                    <span className="mt-1 block text-xs text-stone-500">{t("config.channelEditor.maxConcurrencyDescription")}</span>
                 </label>
             </div>
 
