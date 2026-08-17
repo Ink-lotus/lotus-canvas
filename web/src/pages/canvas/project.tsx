@@ -1026,7 +1026,8 @@ function InfiniteCanvasPage() {
     const pendingSelectionRef = useRef<Set<string> | null>(null);
     const handleNodeSelectCapture = useCallback(
         (event: ReactMouseEvent, nodeId: string) => {
-            if (event.button !== 0) return;
+            const target = event.target instanceof Element ? event.target : null;
+            if (event.button !== 0 || target?.closest(".ant-popover")) return;
             setContextMenu(null);
             setHoveredNodeId(null);
             setSelectedConnectionId(null);
