@@ -13,6 +13,7 @@ import type { CanvasNodeContext, CanvasPluginHost } from "@/types/canvas-plugin"
 import type { CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
 import { useTranslation } from "react-i18next";
 import { DesktopMediaActions } from "@/components/desktop-media-actions";
+import { ImageChannelBadge } from "@/components/image-channel-badge";
 
 type ResizeCorner = "top-left" | "top-right" | "bottom-left" | "bottom-right";
 const selectionBlue = "#2f80ff";
@@ -28,6 +29,7 @@ type CanvasNodeProps = {
     editRequestNonce?: number;
     showPanel: boolean;
     showImageInfo: boolean;
+    onShowImageInfoChange: (show: boolean) => void;
     mentionReferences?: CanvasResourceReference[];
     pluginHost?: CanvasPluginHost;
     registryVersion?: number;
@@ -79,6 +81,8 @@ type NodeContentRendererProps = {
     onDownloadBatchImage?: (imageId: string) => void;
     onRetryBatchImage?: (imageId: string) => void;
     onDeleteBatchImage?: (imageId: string) => void;
+    showImageInfo: boolean;
+    onShowImageInfoChange: (show: boolean) => void;
     groupChildCount: number;
 };
 
@@ -93,6 +97,7 @@ export const CanvasNode = React.memo(function CanvasNode({
     editRequestNonce = 0,
     showPanel,
     showImageInfo,
+    onShowImageInfoChange,
     mentionReferences = [],
     pluginHost,
     renderPanel,
@@ -415,6 +420,8 @@ export const CanvasNode = React.memo(function CanvasNode({
                         onDownloadBatchImage={(imageId) => onDownloadBatchImage?.(data, imageId)}
                         onRetryBatchImage={(imageId) => onRetryBatchImage?.(data, imageId)}
                         onDeleteBatchImage={(imageId) => onDeleteBatchImage?.(data.id, imageId)}
+                        showImageInfo={showImageInfo}
+                        onShowImageInfoChange={onShowImageInfoChange}
                         groupChildCount={groupChildCount}
                     />
                 </div>
@@ -591,6 +598,8 @@ function ImageNodeContent(props: NodeContentRendererProps) {
             onDownloadBatchImage={props.onDownloadBatchImage}
             onRetryBatchImage={props.onRetryBatchImage}
             onDeleteBatchImage={props.onDeleteBatchImage}
+            showImageInfo={props.showImageInfo}
+            onShowImageInfoChange={props.onShowImageInfoChange}
         />
     );
 }
@@ -648,6 +657,8 @@ function ImageContent({
     onDownloadBatchImage,
     onRetryBatchImage,
     onDeleteBatchImage,
+    showImageInfo,
+    onShowImageInfoChange,
 }: {
     node: CanvasNodeData;
     batchExpanded: boolean;
@@ -657,6 +668,8 @@ function ImageContent({
     onDownloadBatchImage?: (imageId: string) => void;
     onRetryBatchImage?: (imageId: string) => void;
     onDeleteBatchImage?: (imageId: string) => void;
+    showImageInfo: boolean;
+    onShowImageInfoChange: (show: boolean) => void;
 }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const { t } = useTranslation();
@@ -672,9 +685,9 @@ function ImageContent({
             {batchExpanded
                 ? images
                       .filter((image) => image.id !== primaryImageId)
-                      .map((image, index) => <ExpandedImageCard key={image.id} node={node} image={image} index={index} onSetPrimary={() => onSetBatchPrimary?.(image.id)} onDuplicate={() => onDuplicateBatchImage?.(image.id)} onDownload={() => onDownloadBatchImage?.(image.id)} onRetry={() => onRetryBatchImage?.(image.id)} onDelete={() => onDeleteBatchImage?.(image.id)} />)
+                      .map((image, index) => <ExpandedImageCard key={image.id} node={node} image={image} index={index} channelLabelsPinned={showImageInfo} onChannelLabelsPinnedChange={onShowImageInfoChange} onSetPrimary={() => onSetBatchPrimary?.(image.id)} onDuplicate={() => onDuplicateBatchImage?.(image.id)} onDownload={() => onDownloadBatchImage?.(image.id)} onRetry={() => onRetryBatchImage?.(image.id)} onDelete={() => onDeleteBatchImage?.(image.id)} />)
                 : null}
-            <div className="h-full w-full overflow-hidden rounded-3xl">
+            <div className="group/channel relative h-full w-full overflow-hidden rounded-3xl">
                 {primaryContent ? (
                     <img
                         src={primaryContent}
@@ -686,6 +699,7 @@ function ImageContent({
                 ) : (
                     <ImageSlotStatus image={primaryImage} />
                 )}
+                {primaryContent ? <ImageChannelBadge model={primaryImage?.model || node.metadata?.model} pinned={showImageInfo} onPinnedChange={onShowImageInfoChange} className={showImageInfo ? "max-w-[45%]" : undefined} /> : null}
             </div>
             {primaryImage?.status === "error" ? <BatchImageFailureActions placement="left" onRetry={() => onRetryBatchImage?.(primaryImage.id)} onDelete={() => onDeleteBatchImage?.(primaryImage.id)} /> : null}
             {primaryImage?.content ? (
@@ -715,7 +729,7 @@ function ImageContent({
     );
 }
 
-function ExpandedImageCard({ node, image, index, onSetPrimary, onDuplicate, onDownload, onRetry, onDelete }: { node: CanvasNodeData; image: CanvasNodeImage; index: number; onSetPrimary: () => void; onDuplicate: () => void; onDownload: () => void; onRetry: () => void; onDelete: () => void }) {
+function ExpandedImageCard({ node, image, index, channelLabelsPinned, onChannelLabelsPinnedChange, onSetPrimary, onDuplicate, onDownload, onRetry, onDelete }: { node: CanvasNodeData; image: CanvasNodeImage; index: number; channelLabelsPinned: boolean; onChannelLabelsPinnedChange: (pinned: boolean) => void; onSetPrimary: () => void; onDuplicate: () => void; onDownload: () => void; onRetry: () => void; onDelete: () => void }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const { t } = useTranslation();
     const count = node.metadata?.images?.length || 0;
@@ -730,7 +744,7 @@ function ExpandedImageCard({ node, image, index, onSetPrimary, onDuplicate, onDo
 
     return (
         <div
-            className="absolute z-20 overflow-hidden rounded-3xl border shadow-[0_18px_50px_rgba(28,25,23,.18)]"
+            className="group/channel absolute z-20 overflow-hidden rounded-3xl border shadow-[0_18px_50px_rgba(28,25,23,.18)]"
             style={
                 {
                     left: x,
@@ -767,6 +781,7 @@ function ExpandedImageCard({ node, image, index, onSetPrimary, onDuplicate, onDo
                     </button>
                 </div>
             ) : null}
+            {image.content ? <ImageChannelBadge model={image.model} pinned={channelLabelsPinned} onPinnedChange={onChannelLabelsPinnedChange} /> : null}
             {image.status === "error" ? <BatchImageFailureActions placement="right" onRetry={onRetry} onDelete={onDelete} /> : null}
         </div>
     );
@@ -805,8 +820,8 @@ function ImageInfoBar({ node }: { node: CanvasNodeData }) {
     const height = Math.round(node.metadata?.naturalHeight || node.height);
     const size = formatBytes(node.metadata?.bytes || 0);
     return (
-        <div className="pointer-events-none absolute bottom-3 right-3 z-40 max-w-[calc(100%-24px)]">
-            <span className="max-w-full truncate rounded-md bg-black/55 px-2 py-1 text-[11px] font-medium leading-none text-white backdrop-blur-sm">
+        <div className="pointer-events-none absolute bottom-3 left-3 z-40 max-w-[45%]">
+            <span className="block max-w-full truncate rounded-md bg-black/55 px-2 py-1 text-[11px] font-medium leading-none text-white backdrop-blur-sm">
                 {width} x {height}
                 {size ? ` · ${size}` : ""}
             </span>

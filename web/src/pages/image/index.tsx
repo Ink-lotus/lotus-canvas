@@ -7,6 +7,7 @@ import { useTranslation } from "react-i18next";
 
 import { ImageSettingsPanel } from "@/components/image-settings-panel";
 import { ImageModelTargetPicker } from "@/components/image-model-target-picker";
+import { ImageChannelBadge } from "@/components/image-channel-badge";
 import { DesktopMediaActions } from "@/components/desktop-media-actions";
 import { PromptSelectDialog } from "@/components/prompts/prompt-select-dialog";
 import { AssetPickerModal, type InsertAssetPayload } from "@/components/canvas/asset-picker-modal";
@@ -100,6 +101,7 @@ export default function ImagePage() {
     const [previewLog, setPreviewLog] = useState<GenerationLog | null>(null);
     const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
     const [isReferenceDragActive, setIsReferenceDragActive] = useState(false);
+    const [channelLabelsPinned, setChannelLabelsPinned] = useState(false);
     const [autoRunToken, setAutoRunToken] = useState(0);
     const imageCommand = useWorkbenchAgentStore((state) => state.imageCommand);
     const clearImageCommand = useWorkbenchAgentStore((state) => state.clearImageCommand);
@@ -536,7 +538,7 @@ export default function ImagePage() {
                             <div className="grid gap-4 sm:grid-cols-2 2xl:grid-cols-3">
                                 {results.map((result, index) =>
                                     result.status === "success" && result.image ? (
-                                        <ResultImageCard key={result.id} image={result.image} index={index} onEdit={addResultToReferences} onDownload={downloadImage} onSaveAsset={saveResultToAssets} />
+                                        <ResultImageCard key={result.id} image={result.image} index={index} channelLabelsPinned={channelLabelsPinned} onChannelLabelsPinnedChange={setChannelLabelsPinned} onEdit={addResultToReferences} onDownload={downloadImage} onSaveAsset={saveResultToAssets} />
                                     ) : result.status === "failed" ? (
                                         <FailedImageCard key={result.id} error={result.error || t("workbench.generationFailed")} onRetry={() => retryResult(index)} />
                                     ) : (
@@ -609,12 +611,16 @@ function GenerationSettings({ config, targets, onTargetsChange, updateConfig, op
 function ResultImageCard({
     image,
     index,
+    channelLabelsPinned,
+    onChannelLabelsPinnedChange,
     onEdit,
     onDownload,
     onSaveAsset,
 }: {
     image: GeneratedImage;
     index: number;
+    channelLabelsPinned: boolean;
+    onChannelLabelsPinnedChange: (pinned: boolean) => void;
     onEdit: (image: GeneratedImage, index: number) => void;
     onDownload: (image: GeneratedImage, index: number) => void;
     onSaveAsset: (image: GeneratedImage, index: number) => void;
@@ -623,7 +629,10 @@ function ResultImageCard({
     const downloadLabel = t(isDesktopMediaLibrary() ? "common.exportCopy" : "common.download");
     return (
         <div className="overflow-hidden rounded-lg border border-stone-200 bg-background dark:border-stone-800">
-            <Image src={image.dataUrl} alt={t("imageWorkbench.resultAlt", { count: index + 1 })} className="aspect-square object-cover" />
+            <div className="group/channel relative">
+                <Image src={image.dataUrl} alt={t("imageWorkbench.resultAlt", { count: index + 1 })} className="aspect-square object-cover" />
+                <ImageChannelBadge model={image.model} pinned={channelLabelsPinned} onPinnedChange={onChannelLabelsPinnedChange} />
+            </div>
             <div className="space-y-2 border-t border-stone-200 px-3 py-2.5 dark:border-stone-800">
                 <div className="flex min-w-0 items-center justify-between gap-2 text-xs text-stone-500 dark:text-stone-400">
                     <div className="flex min-w-0 gap-x-2 gap-y-1">

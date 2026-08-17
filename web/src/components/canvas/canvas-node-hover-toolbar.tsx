@@ -9,6 +9,7 @@ import { formatBytes, getDataUrlByteSize } from "@/lib/image-utils";
 import { useCopyText } from "@/hooks/use-copy-text";
 import { DesktopMediaActions } from "@/components/desktop-media-actions";
 import { useThemeStore } from "@/stores/use-theme-store";
+import { modelOptionChannelName, modelOptionName, useConfigStore } from "@/stores/use-config-store";
 import { CanvasNodeType, type CanvasNodeData, type ViewportTransform } from "@/types/canvas";
 import type { CanvasNodeToolbarItem } from "@/types/canvas-plugin";
 import { ImageToolSettingsModal, type ImageToolbarSettingsTool } from "./canvas-image-toolbar-settings-modal";
@@ -222,8 +223,11 @@ export function CanvasNodeInfoModal({ node, open, onClose }: { node: CanvasNodeD
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const { t } = useTranslation();
     const [view, setView] = useState<"info" | "json">("info");
+    const channels = useConfigStore((state) => state.config.channels);
     const imageBytes = node?.type === CanvasNodeType.Image && node.metadata?.content ? getDataUrlByteSize(node.metadata.content) : 0;
     const batchCount = node?.type === CanvasNodeType.Image ? node.metadata?.images?.length || 0 : 0;
+    const imageModel = batchCount > 1 ? "" : node?.metadata?.model || "";
+    const imageChannel = modelOptionChannelName(channels, imageModel);
     const json = useMemo(() => {
         if (!node) return "";
         return JSON.stringify(
@@ -270,6 +274,17 @@ export function CanvasNodeInfoModal({ node, open, onClose }: { node: CanvasNodeD
                             <InfoRow label={t("canvas.nodeToolbar.position")} value={`${Math.round(node.position.x)}, ${Math.round(node.position.y)}`} />
                             <InfoRow label={t("canvas.nodeToolbar.status")} value={node.metadata?.status || "idle"} />
                             {batchCount > 1 ? <InfoRow label={t("canvas.nodeToolbar.imageGroup")} value={t("canvas.configNode.images", { count: batchCount })} /> : null}
+                            {imageChannel ? <InfoRow label={t("canvas.nodeToolbar.channel")} value={imageChannel} /> : null}
+                            {imageModel ? <InfoRow label={t("canvas.nodeToolbar.model")} value={modelOptionName(imageModel)} /> : null}
+                            {batchCount > 1
+                                ? node.metadata?.images
+                                      .map((image, index) => {
+                                          if (!image.model) return null;
+                                          const channel = modelOptionChannelName(channels, image.model || "");
+                                          const model = modelOptionName(image.model || "");
+                                          return <InfoRow key={image.id} label={t(image.id === node.metadata?.primaryImageId ? "canvas.nodeToolbar.imageIndexPrimary" : "canvas.nodeToolbar.imageIndex", { index: index + 1 })} value={[channel, model].filter(Boolean).join(" · ")} />;
+                                      })
+                                : null}
                             {node.metadata?.prompt ? <InfoRow label={t("canvas.configNode.prompt")} value={node.metadata.prompt} /> : null}
                             {imageBytes ? <InfoRow label={t("canvas.nodeToolbar.imageSize")} value={formatBytes(imageBytes)} /> : null}
                             {node.metadata?.errorDetails ? (

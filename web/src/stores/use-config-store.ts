@@ -324,6 +324,12 @@ export function modelOptionLabel(config: AiConfig, value: string) {
     return channel ? `${decoded.model}（${channel.name}）` : decoded.model;
 }
 
+export function modelOptionChannelName(channels: ModelChannel[], value: string) {
+    const decoded = decodeChannelModel(value);
+    if (!decoded) return "";
+    return channels.find((channel) => channel.id === decoded.channelId)?.name || decoded.channelId;
+}
+
 export function modelOptionsFromChannels(channels: ModelChannel[]) {
     return uniqueModelOptions(channels.flatMap((channel) => channel.models.map((model) => encodeChannelModel(channel.id, model.name))));
 }

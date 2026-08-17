@@ -2876,6 +2876,7 @@ function InfiniteCanvasPage() {
                             isGroupDropTarget={dropTargetGroupId === node.id}
                             batchExpanded={expandedImageNodeId === node.id}
                             showImageInfo={showImageInfo}
+                            onShowImageInfoChange={setShowImageInfo}
                             mentionReferences={mentionReferencesByNodeId.get(node.id) || EMPTY_REFERENCES}
                             pluginHost={pluginHost}
                             registryVersion={nodeRegistryVersion}
