@@ -183,6 +183,7 @@ function InfiniteCanvasPage() {
 
     const config = useConfigStore((state) => state.config);
     const effectiveConfig = useEffectiveConfig();
+    const selectedImageModel = effectiveConfig.imageModelTargets[0] || effectiveConfig.imageModel || effectiveConfig.model;
     const isAiConfigReady = useConfigStore((state) => state.isAiConfigReady);
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const addAsset = useAssetStore((state) => state.addAsset);
@@ -506,7 +507,7 @@ function InfiniteCanvasPage() {
 
     const createConnectedNode = useCallback(
         (type: CanvasNodeType.Image | CanvasNodeType.Text | CanvasNodeType.Config | CanvasNodeType.Video | CanvasNodeType.Audio, pending: PendingConnectionCreate) => {
-            const metadata = type === CanvasNodeType.Config ? { model: effectiveConfig.imageModel || effectiveConfig.model, size: effectiveConfig.size, count: getGenerationCount(effectiveConfig.canvasImageCount || effectiveConfig.count) } : undefined;
+            const metadata = type === CanvasNodeType.Config ? { model: selectedImageModel, imageModelTargets: effectiveConfig.imageModelTargets, size: effectiveConfig.size, count: getGenerationCount(effectiveConfig.canvasImageCount || effectiveConfig.count) } : undefined;
             const newNode = createCanvasNode(type, pending.position, metadata);
             const connection = normalizeConnection(pending.connection.nodeId, newNode.id, [...nodesRef.current, newNode], pending.connection.handleType);
             if (!connection) {
@@ -521,7 +522,7 @@ function InfiniteCanvasPage() {
             setPendingConnectionCreate(null);
             setConnecting(null);
         },
-        [effectiveConfig.canvasImageCount, effectiveConfig.count, effectiveConfig.imageModel, effectiveConfig.model, effectiveConfig.size, message, setConnecting, t],
+        [effectiveConfig.canvasImageCount, effectiveConfig.count, effectiveConfig.imageModelTargets, effectiveConfig.size, message, selectedImageModel, setConnecting, t],
     );
 
     const cancelPendingConnectionCreate = useCallback(() => {
@@ -669,7 +670,8 @@ function InfiniteCanvasPage() {
             const configMetadata =
                 type === CanvasNodeType.Config
                     ? {
-                          model: effectiveConfig.imageModel || effectiveConfig.model,
+                          model: selectedImageModel,
+                          imageModelTargets: effectiveConfig.imageModelTargets,
                           size: effectiveConfig.size,
                           count: getGenerationCount(effectiveConfig.canvasImageCount || effectiveConfig.count),
                       }
@@ -692,7 +694,7 @@ function InfiniteCanvasPage() {
                     : isBuiltinType(type) && type !== CanvasNodeType.Text && type !== CanvasNodeType.Audio && type !== CanvasNodeType.Group;
             if (wantsPanel) setDialogNodeId(newNode.id);
         },
-        [effectiveConfig.canvasImageCount, effectiveConfig.count, effectiveConfig.imageModel, effectiveConfig.model, effectiveConfig.size, getCanvasCenter],
+        [effectiveConfig.canvasImageCount, effectiveConfig.count, effectiveConfig.imageModelTargets, effectiveConfig.size, getCanvasCenter, selectedImageModel],
     );
 
     const deleteNodes = useCallback(
@@ -2049,7 +2051,7 @@ function InfiniteCanvasPage() {
                             const requestConfig = { ...generationConfig, model: target, imageModel: target, count: "1" };
                             return refs.length ? requestEdit(requestConfig, fullPrompt, refs, undefined, { signal: controller.signal }) : requestGeneration(requestConfig, fullPrompt, { signal: controller.signal });
                         },
-                        controller.signal,
+                        { signal: controller.signal, preferredTarget: generationConfig.imageModel, fallbackOnError: true },
                     );
                     const image = scheduled.value[0];
                     const uploaded = await uploadImage(image.dataUrl);
@@ -2172,7 +2174,7 @@ function InfiniteCanvasPage() {
                     let hasFailure = false;
                     let firstError = "";
                     await Promise.all(
-                        imageIds.map(async (imageId) => {
+                        imageIds.map(async (imageId, index) => {
                             try {
                                 const scheduled = await scheduleImageGeneration(
                                     generationConfig,
@@ -2181,7 +2183,7 @@ function InfiniteCanvasPage() {
                                         const requestConfig = { ...generationConfig, model: target, imageModel: target, count: "1" };
                                         return referenceImages.length ? requestEdit(requestConfig, effectivePrompt, referenceImages, undefined, { signal: controller.signal }) : requestGeneration(requestConfig, effectivePrompt, { signal: controller.signal });
                                     },
-                                    controller.signal,
+                                    { signal: controller.signal, preferredTarget: index === 0 ? generationConfig.imageModel : undefined, fallbackOnError: count === 1 },
                                 );
                                 const image = scheduled.value[0];
                                 const uploaded = await uploadImage(image.dataUrl);
@@ -2525,7 +2527,11 @@ function InfiniteCanvasPage() {
                         const requestConfig = { ...generationConfig, model: target, imageModel: target };
                         return useReferenceImages ? requestEdit(requestConfig, prompt, retryImages, undefined, { signal: controller.signal }) : requestGeneration(requestConfig, prompt, { signal: controller.signal });
                     },
-                    controller.signal,
+                    {
+                        signal: controller.signal,
+                        preferredTarget: (node.metadata?.images?.length || 1) === 1 ? generationConfig.imageModel : undefined,
+                        fallbackOnError: (node.metadata?.images?.length || 1) === 1,
+                    },
                 );
                 const image = scheduled.value[0];
                 const uploadedImage = await uploadImage(image.dataUrl);
@@ -2619,7 +2625,8 @@ function InfiniteCanvasPage() {
                 },
                 {
                     prompt: "",
-                    model: effectiveConfig.imageModel || effectiveConfig.model,
+                    model: selectedImageModel,
+                    imageModelTargets: effectiveConfig.imageModelTargets,
                     size: effectiveConfig.size,
                     count: getGenerationCount(effectiveConfig.canvasImageCount || effectiveConfig.count),
                 },
@@ -2635,7 +2642,7 @@ function InfiniteCanvasPage() {
             setSelectedConnectionId(null);
             setDialogNodeId(configNode.id);
         },
-        [effectiveConfig.canvasImageCount, effectiveConfig.count, effectiveConfig.imageModel, effectiveConfig.model, effectiveConfig.size, message, t],
+        [effectiveConfig.canvasImageCount, effectiveConfig.count, effectiveConfig.imageModelTargets, effectiveConfig.size, message, selectedImageModel, t],
     );
 
     const insertAssistantImage = useCallback(

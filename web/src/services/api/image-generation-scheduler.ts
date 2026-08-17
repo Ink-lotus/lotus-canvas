@@ -1,9 +1,15 @@
 import { decodeChannelModel, normalizeChannelConcurrency, normalizeImageModelTargets, type AiConfig } from "@/stores/use-config-store";
 
 type ScheduledImageResult<T> = { value: T; target: string };
+type ScheduleImageGenerationOptions = {
+    signal?: AbortSignal;
+    preferredTarget?: string;
+    fallbackOnError?: boolean;
+};
 type PendingJob<T> = {
     config: AiConfig;
     targets: string[];
+    preferredTarget?: string;
     signal?: AbortSignal;
     run: (target: string) => Promise<T>;
     resolve: (result: ScheduledImageResult<T>) => void;
@@ -11,17 +17,26 @@ type PendingJob<T> = {
     started: boolean;
 };
 
+class ImageGenerationAttemptError {
+    constructor(
+        readonly target: string,
+        readonly cause: unknown,
+    ) {}
+}
+
 class ImageGenerationScheduler {
     private pending: PendingJob<unknown>[] = [];
     private activeByChannel = new Map<string, number>();
     private cursor = 0;
 
-    schedule<T>(config: AiConfig, targets: string[], run: (target: string) => Promise<T>, signal?: AbortSignal) {
+    schedule<T>(config: AiConfig, targets: string[], run: (target: string) => Promise<T>, options: ScheduleImageGenerationOptions = {}) {
         const normalizedTargets = normalizeImageModelTargets(targets[0] || config.imageModel, targets, config.channels);
         if (!normalizedTargets.length) return Promise.reject(new Error("没有可用的图片生成渠道"));
+        const { signal } = options;
         if (signal?.aborted) return Promise.reject(abortError());
         return new Promise<ScheduledImageResult<T>>((resolve, reject) => {
-            const job: PendingJob<T> = { config, targets: normalizedTargets, signal, run, resolve, reject, started: false };
+            const preferredTarget = normalizedTargets.includes(options.preferredTarget || "") ? options.preferredTarget : undefined;
+            const job: PendingJob<T> = { config, targets: normalizedTargets, preferredTarget, signal, run, resolve, reject, started: false };
             const abort = () => {
                 if (job.started) return;
                 const index = this.pending.indexOf(job as PendingJob<unknown>);
@@ -67,6 +82,14 @@ class ImageGenerationScheduler {
     }
 
     private pickTarget(job: PendingJob<unknown>) {
+        // A preferred job waits for its selected channel; fallback starts only after an actual request failure.
+        if (job.preferredTarget) {
+            const channelId = decodeChannelModel(job.preferredTarget)?.channelId;
+            const channel = job.config.channels.find((item) => item.id === channelId);
+            if (!channelId || !channel) return null;
+            const active = this.activeByChannel.get(channelId) || 0;
+            return active < normalizeChannelConcurrency(channel.maxConcurrency) ? { target: job.preferredTarget, channelId } : null;
+        }
         const candidates = job.targets.flatMap((target, index) => {
             const channelId = decodeChannelModel(target)?.channelId;
             const channel = job.config.channels.find((item) => item.id === channelId);
@@ -87,7 +110,10 @@ class ImageGenerationScheduler {
         this.activeByChannel.set(target.channelId, (this.activeByChannel.get(target.channelId) || 0) + 1);
         Promise.resolve()
             .then(() => job.run(target.target))
-            .then((value) => job.resolve({ value, target: target.target }), job.reject)
+            .then(
+                (value) => job.resolve({ value, target: target.target }),
+                (error) => job.reject(new ImageGenerationAttemptError(target.target, error)),
+            )
             .finally(() => {
                 const active = (this.activeByChannel.get(target.channelId) || 1) - 1;
                 if (active > 0) this.activeByChannel.set(target.channelId, active);
@@ -99,10 +125,27 @@ class ImageGenerationScheduler {
 
 const scheduler = new ImageGenerationScheduler();
 
-export function scheduleImageGeneration<T>(config: AiConfig, targets: string[], run: (target: string) => Promise<T>, signal?: AbortSignal) {
-    return scheduler.schedule(config, targets, run, signal);
+export async function scheduleImageGeneration<T>(config: AiConfig, targets: string[], run: (target: string) => Promise<T>, options: ScheduleImageGenerationOptions = {}) {
+    let remainingTargets = normalizeImageModelTargets(targets[0] || config.imageModel, targets, config.channels);
+    let preferredTarget = remainingTargets.includes(options.preferredTarget || "") ? options.preferredTarget : undefined;
+    while (remainingTargets.length) {
+        try {
+            return await scheduler.schedule(config, remainingTargets, run, { signal: options.signal, preferredTarget });
+        } catch (error) {
+            if (!(error instanceof ImageGenerationAttemptError)) throw error;
+            if (!options.fallbackOnError || isAbortError(error.cause)) throw error.cause;
+            remainingTargets = remainingTargets.filter((target) => target !== error.target);
+            preferredTarget = undefined;
+            if (!remainingTargets.length) throw error.cause;
+        }
+    }
+    throw new Error("没有可用的图片生成渠道");
 }
 
 function abortError() {
     return new DOMException("Aborted", "AbortError");
+}
+
+function isAbortError(error: unknown) {
+    return error instanceof Error && error.name === "AbortError";
 }

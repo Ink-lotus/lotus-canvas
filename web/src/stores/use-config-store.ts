@@ -204,13 +204,12 @@ export const useConfigStore = create<ConfigStore>()(
                     config: {
                         ...state.config,
                         [key]: value,
-                        ...(key === "imageModel" ? { imageModelTargets: [String(value)] } : {}),
                     },
                 })),
             setImageModelTargets: (targets) =>
                 set((state) => {
                     const imageModelTargets = normalizeImageModelTargets(targets[0] || state.config.imageModel, targets, state.config.channels);
-                    return { config: { ...state.config, imageModel: imageModelTargets[0] || "", imageModelTargets } };
+                    return { config: { ...state.config, imageModelTargets } };
                 }),
             updateWebdavConfig: (key, value) =>
                 set((state) => ({
@@ -361,18 +360,16 @@ export function resolveModelRequestConfig(config: AiConfig, value: string) {
 
 export function normalizeImageModelTargets(primary: string, targets: string[] | undefined, channels: ModelChannel[]) {
     const normalizedPrimary = normalizeModelOptionValue(primary, channels);
-    if (!normalizedPrimary) return [];
-    const modelName = modelOptionName(normalizedPrimary);
-    return Array.from(
-        new Set(
-            [normalizedPrimary, ...(Array.isArray(targets) ? targets : [])].filter((value) => {
-                const decoded = decodeChannelModel(value);
-                if (!decoded || decoded.model !== modelName) return false;
-                const channel = channels.find((item) => item.id === decoded.channelId);
-                return channel?.models.some((model) => model.name === modelName && model.capability === "image");
-            }),
-        ),
-    );
+    const isImageTarget = (value: string) => {
+        const decoded = decodeChannelModel(value);
+        const channel = decoded ? channels.find((item) => item.id === decoded.channelId) : undefined;
+        return Boolean(decoded && channel?.models.some((model) => model.name === decoded.model && model.capability === "image"));
+    };
+    const selected = Array.from(new Set((Array.isArray(targets) ? targets : []).map((value) => normalizeModelOptionValue(value, channels)).filter(isImageTarget)));
+    const modelName = modelOptionName(selected[0] || normalizedPrimary);
+    const normalized = selected.filter((value) => modelOptionName(value) === modelName);
+    if (normalized.length) return normalized;
+    return normalizedPrimary && isImageTarget(normalizedPrimary) ? [normalizedPrimary] : [];
 }
 
 export function normalizeChannelConcurrency(value: unknown) {

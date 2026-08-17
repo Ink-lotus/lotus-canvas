@@ -147,7 +147,7 @@ function listCanvasProjects(input: SiteToolInput) {
 
 function getImageConfig() {
     const { config } = useConfigStore.getState();
-    const model = config.imageModel || config.model;
+    const model = config.imageModelTargets[0] || config.imageModel || config.model;
     return {
         current: { model, modelName: modelOptionName(model), quality: config.quality || "auto", size: config.size || "1:1", count: config.count || "1" },
         models: selectableModelsByCapability(config, "image").map((value) => ({ value, label: modelOptionLabel(config, value) })),
@@ -162,7 +162,7 @@ function runImageWorkbench(input: SiteToolInput, navigate: NavigateFunction) {
     const applied: Record<string, unknown> = {};
     if (typeof input.model === "string" && input.model.trim()) {
         const value = normalizeModelOptionValue(input.model, configStore.config.channels) || input.model;
-        configStore.updateConfig("imageModel", value);
+        configStore.setImageModelTargets([value]);
         applied.model = value;
     }
     if (typeof input.quality === "string" && input.quality.trim()) {

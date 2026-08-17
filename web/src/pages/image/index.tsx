@@ -170,7 +170,7 @@ export default function ImagePage() {
             return;
         }
 
-        const snapshot = buildRequestSnapshot();
+        const snapshot = buildRequestSnapshot(generationCount);
         if (!snapshot) {
             if (agentTaskId) updateAgentTask(agentTaskId, { status: "failed", error: t("imageWorkbench.invalidParams") });
             return;
@@ -320,14 +320,14 @@ export default function ImagePage() {
         setPrompt(log.prompt);
         setReferences(log.references || []);
         if (log.config.imageModelTargets?.length) setImageModelTargets(log.config.imageModelTargets);
-        else if (log.config.imageModel || log.model) updateConfig("imageModel", log.config.imageModel || log.model);
+        else if (log.config.imageModel || log.model) setImageModelTargets([log.config.imageModel || log.model]);
         if (log.config.quality) updateConfig("quality", log.config.quality);
         if (log.config.size) updateConfig("size", log.config.size);
         if (log.config.count) updateConfig("count", log.config.count);
         setResults(log.images.map((image) => ({ id: image.id, status: "success", image })));
     };
 
-    const buildRequestSnapshot = () => {
+    const buildRequestSnapshot = (outputCount = generationCount) => {
         const text = prompt.trim();
         if (!text) {
             message.error(t("imageWorkbench.promptRequired"));
@@ -338,16 +338,21 @@ export default function ImagePage() {
             openConfigDialog(true);
             return null;
         }
-        return { text, config: { ...effectiveConfig, model, imageModel: model, imageModelTargets: modelTargets, count: "1" }, targets: modelTargets, references: [...references] };
+        return { text, config: { ...effectiveConfig, model, imageModelTargets: modelTargets, count: "1" }, targets: modelTargets, references: [...references], outputCount };
     };
 
-    const runGenerationSlot = async (index: number, snapshot: { text: string; config: AiConfig; targets: string[]; references: ReferenceImage[] }) => {
+    const runGenerationSlot = async (index: number, snapshot: { text: string; config: AiConfig; targets: string[]; references: ReferenceImage[]; outputCount: number }) => {
         const itemStartedAt = performance.now();
         try {
-            const scheduled = await scheduleImageGeneration(snapshot.config, snapshot.targets, async (target) => {
-                const requestConfig = { ...snapshot.config, model: target, imageModel: target };
-                return snapshot.references.length ? requestEdit(requestConfig, snapshot.text, snapshot.references) : requestGeneration(requestConfig, snapshot.text);
-            });
+            const scheduled = await scheduleImageGeneration(
+                snapshot.config,
+                snapshot.targets,
+                async (target) => {
+                    const requestConfig = { ...snapshot.config, model: target, imageModel: target };
+                    return snapshot.references.length ? requestEdit(requestConfig, snapshot.text, snapshot.references) : requestGeneration(requestConfig, snapshot.text);
+                },
+                { preferredTarget: index === 0 ? snapshot.config.imageModel : undefined, fallbackOnError: snapshot.outputCount === 1 },
+            );
             const result = scheduled.value;
             const image = result[0];
             if (!image) throw new Error(t("imageWorkbench.missingResult"));
@@ -362,7 +367,7 @@ export default function ImagePage() {
     };
 
     const retryResult = async (index: number) => {
-        const snapshot = buildRequestSnapshot();
+        const snapshot = buildRequestSnapshot(Math.max(1, results.length));
         if (!snapshot) return;
         setPreviewLog(null);
         setResults((value) => updateResultAt(value, index, { status: "pending", error: undefined, image: undefined }));
