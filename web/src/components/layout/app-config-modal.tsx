@@ -257,6 +257,9 @@ export function AppConfigPanel({ showDoneButton = false, initialTab = "channels"
                                 <Form.Item label={t("config.preferences.audioInstructions")} className="mb-4">
                                     <Input.TextArea rows={2} value={config.audioInstructions} placeholder={t("config.preferences.audioInstructionsPlaceholder")} onChange={(event) => updateConfig("audioInstructions", event.target.value)} />
                                 </Form.Item>
+                                <Form.Item label={t("config.preferences.reversePrompt")} extra={t("config.preferences.reversePromptDescription")} className="mb-4">
+                                    <Input.TextArea rows={6} value={config.reversePrompt} placeholder={t("config.preferences.reversePromptPlaceholder")} onChange={(event) => updateConfig("reversePrompt", event.target.value)} />
+                                </Form.Item>
                                 <Form.Item label={t("config.preferences.systemPrompt")} className="mb-0">
                                     <Input.TextArea rows={4} value={config.systemPrompt} placeholder={t("config.preferences.systemPromptPlaceholder")} onChange={(event) => updateConfig("systemPrompt", event.target.value)} />
                                 </Form.Item>

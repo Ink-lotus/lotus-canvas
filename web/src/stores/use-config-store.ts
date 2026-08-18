@@ -46,6 +46,7 @@ export type AiConfig = {
     videoGenerateAudio: string;
     videoWatermark: string;
     systemPrompt: string;
+    reversePrompt: string;
     reasoningEffort: ReasoningEffort;
     models: string[];
     quality: string;
@@ -68,6 +69,7 @@ export const CONFIG_STORE_KEY = "infinite-canvas:ai_config_store";
 const CHANNEL_MODEL_SEPARATOR = "::";
 const OPENAI_BASE_URL = "https://api.openai.com";
 const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com";
+const DEFAULT_REVERSE_PROMPT = i18n.t("canvas.projectPage.reversePreset");
 
 export const defaultConfig: AiConfig = {
     channelMode: "local",
@@ -105,6 +107,7 @@ export const defaultConfig: AiConfig = {
     videoGenerateAudio: "true",
     videoWatermark: "false",
     systemPrompt: "",
+    reversePrompt: DEFAULT_REVERSE_PROMPT,
     reasoningEffort: "auto",
     models: ["default::gpt-image-2", "default::grok-imagine-video", "default::gpt-5.5", "default::gpt-4o-mini-tts"],
     quality: "auto",
@@ -261,6 +264,7 @@ export const useConfigStore = create<ConfigStore>()(
                         vquality: config.vquality || "720",
                         videoGenerateAudio: config.videoGenerateAudio || "true",
                         videoWatermark: config.videoWatermark || "false",
+                        reversePrompt: typeof config.reversePrompt === "string" ? config.reversePrompt : defaultConfig.reversePrompt,
                         canvasImageCount: config.canvasImageCount || "3",
                     },
                 };

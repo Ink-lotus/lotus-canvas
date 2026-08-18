@@ -1591,8 +1591,9 @@ function InfiniteCanvasPage() {
             const textSpec = NODE_DEFAULT_SIZE[CanvasNodeType.Text];
             const configSpec = NODE_DEFAULT_SIZE[CanvasNodeType.Config];
             const centerY = node.position.y + node.height / 2;
+            const reversePrompt = typeof effectiveConfig.reversePrompt === "string" ? effectiveConfig.reversePrompt : defaultConfig.reversePrompt;
             const textNode = {
-                ...createCanvasNode(CanvasNodeType.Text, { x: node.position.x + node.width + gap + textSpec.width / 2, y: centerY }, { content: t("canvas.projectPage.reversePreset"), prompt: t("canvas.projectPage.reversePreset"), status: NODE_STATUS_SUCCESS, fontSize: 14 }),
+                ...createCanvasNode(CanvasNodeType.Text, { x: node.position.x + node.width + gap + textSpec.width / 2, y: centerY }, { content: reversePrompt, prompt: reversePrompt, status: NODE_STATUS_SUCCESS, fontSize: 14 }),
                 title: t("canvas.projectPage.reverseTitle"),
             };
             const configNode = {
@@ -1616,7 +1617,7 @@ function InfiniteCanvasPage() {
             setDialogNodeId(configNode.id);
             setContextMenu(null);
         },
-        [effectiveConfig.model, effectiveConfig.textModel, message, t],
+        [effectiveConfig.model, effectiveConfig.reversePrompt, effectiveConfig.textModel, message, t],
     );
 
     const cropImageNode = useCallback(async (node: CanvasNodeData, crop: CanvasImageCropRect) => {
