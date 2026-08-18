@@ -40,6 +40,7 @@ function createMediaProtocolHandler({ library, shell }) {
                 const entry = await library.put(storageKey, request.body, {
                     mimeType: request.headers.get("content-type") || "application/octet-stream",
                     suggestedName: decodeHeader(request.headers.get("x-lotus-file-name")),
+                    origin: decodeHeader(request.headers.get("x-lotus-media-origin")),
                 });
                 return jsonResponse(entry, 201);
             }
@@ -52,7 +53,7 @@ function createMediaProtocolHandler({ library, shell }) {
             if (!entry) return jsonError(404, "媒体文件不存在");
             return fileResponse(entry, request);
         } catch (error) {
-            const status = error?.code === "INVALID_KEY" || error?.code === "INVALID_BODY" || error?.code === "EMPTY_BODY" ? 400 : error?.code === "KEY_CONFLICT" ? 409 : 500;
+            const status = error?.code === "INVALID_KEY" || error?.code === "INVALID_BODY" || error?.code === "EMPTY_BODY" || error?.code === "INVALID_ORIGIN" ? 400 : error?.code === "KEY_CONFLICT" ? 409 : 500;
             return jsonError(status, error?.message || String(error));
         }
     };

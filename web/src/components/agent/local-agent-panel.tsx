@@ -1545,7 +1545,7 @@ async function importGeneratedImages(endpoint: string, token: string, item: Agen
                 : await fetch(`${endpoint}/agent/local-image?token=${encodeURIComponent(token)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ path: source }) });
             if (!response.ok) throw new Error(rt("generatedImageReadFailed"));
             const blob = await response.blob();
-            const upload = await uploadImage(blob);
+            const upload = await uploadImage(blob, { origin: "generated" });
             const dataUrl = await readDataUrl(blob);
             const name = source.startsWith("/") ? source.split("/").at(-1) || rt("generatedImageName", { index: index + 1 }) : rt("generatedImageName", { index: index + 1 });
             return { upload, name, attachment: { id: createId(), name, type: blob.type || upload.mimeType, size: blob.size, width: upload.width, height: upload.height, url: upload.url, dataUrl } };

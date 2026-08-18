@@ -200,7 +200,7 @@ export default function ImagePage() {
             const logImages = await Promise.all(
                 successImages.map(async (image) => {
                     if (image.storageKey) return image;
-                    const stored = await uploadImage(image.dataUrl);
+                    const stored = await uploadImage(image.dataUrl, { origin: "generated" });
                     return { ...image, dataUrl: stored.url, storageKey: stored.storageKey, width: stored.width, height: stored.height, bytes: stored.bytes, mimeType: stored.mimeType };
                 }),
             );
@@ -252,7 +252,7 @@ export default function ImagePage() {
     };
 
     const addResultToReferences = async (image: GeneratedImage, index: number) => {
-        const stored = image.storageKey ? { url: image.dataUrl, storageKey: image.storageKey, mimeType: image.mimeType || "image/png" } : await uploadImage(image.dataUrl);
+        const stored = image.storageKey ? { url: image.dataUrl, storageKey: image.storageKey, mimeType: image.mimeType || "image/png" } : await uploadImage(image.dataUrl, { origin: "generated" });
         setReferences((value) => [...value, { id: nanoid(), name: `result-${index + 1}.png`, type: stored.mimeType, dataUrl: stored.url, storageKey: stored.storageKey }]);
         message.success(t("imageWorkbench.addedReference"));
     };
@@ -260,7 +260,7 @@ export default function ImagePage() {
     const saveResultToAssets = async (image: GeneratedImage, index: number) => {
         const stored = image.storageKey
             ? { url: image.dataUrl, storageKey: image.storageKey, width: image.width, height: image.height, bytes: image.bytes, mimeType: image.mimeType || "image/png" }
-            : await uploadImage(image.dataUrl);
+            : await uploadImage(image.dataUrl, { origin: "generated" });
         addAsset({
             kind: "image",
             title: t("imageWorkbench.resultTitle", { count: index + 1 }),
@@ -376,7 +376,7 @@ export default function ImagePage() {
         const retryStartedAt = performance.now();
         try {
             const image = await runGenerationSlot(index, snapshot);
-            const stored = image.storageKey ? null : await uploadImage(image.dataUrl);
+            const stored = image.storageKey ? null : await uploadImage(image.dataUrl, { origin: "generated" });
             const logImage = stored ? { ...image, dataUrl: stored.url, storageKey: stored.storageKey, width: stored.width, height: stored.height, bytes: stored.bytes, mimeType: stored.mimeType } : image;
             setResults((value) => updateResultAt(value, index, { image: logImage }));
             saveLog(

@@ -1,6 +1,6 @@
 import localforage from "localforage";
 import { nanoid } from "nanoid";
-import { deleteDesktopMedia, desktopMediaUrl, getDesktopMediaBlob, hasDesktopMedia, isDesktopMediaLibrary, listDesktopMediaKeys, putDesktopMedia } from "@/services/desktop-media-storage";
+import { deleteDesktopMedia, desktopMediaUrl, getDesktopMediaBlob, hasDesktopMedia, isDesktopMediaLibrary, listDesktopMediaKeys, putDesktopMedia, type MediaOrigin } from "@/services/desktop-media-storage";
 
 export type UploadedFile = { url: string; storageKey: string; bytes: number; mimeType: string; width?: number; height?: number; durationMs?: number };
 
@@ -8,11 +8,11 @@ const store = localforage.createInstance({ name: "infinite-canvas", storeName: "
 const videoLogStore = localforage.createInstance({ name: "infinite-canvas", storeName: "video_generation_logs" });
 const objectUrls = new Map<string, string>();
 
-export async function uploadMediaFile(input: string | Blob, prefix = "file", options?: { suggestedName?: string }): Promise<UploadedFile> {
+export async function uploadMediaFile(input: string | Blob, prefix = "file", options?: { suggestedName?: string; origin?: MediaOrigin }): Promise<UploadedFile> {
     const blob = typeof input === "string" ? await (await fetch(input)).blob() : input;
     const storageKey = `${prefix}:${nanoid()}`;
     const desktop = isDesktopMediaLibrary();
-    if (desktop) await putDesktopMedia(storageKey, blob, options?.suggestedName || (input instanceof File ? input.name : ""));
+    if (desktop) await putDesktopMedia(storageKey, blob, options?.suggestedName || (input instanceof File ? input.name : ""), undefined, options?.origin);
     else await store.setItem(storageKey, blob);
     const url = desktop ? desktopMediaUrl(storageKey) : URL.createObjectURL(blob);
     objectUrls.set(storageKey, url);
@@ -44,9 +44,9 @@ export async function getMediaBlob(storageKey: string) {
     return store.getItem<Blob>(storageKey);
 }
 
-export async function setMediaBlob(storageKey: string, blob: Blob) {
+export async function setMediaBlob(storageKey: string, blob: Blob, origin: MediaOrigin = "external") {
     const desktop = isDesktopMediaLibrary();
-    if (desktop) await putDesktopMedia(storageKey, blob);
+    if (desktop) await putDesktopMedia(storageKey, blob, "", undefined, origin);
     else await store.setItem(storageKey, blob);
     const url = desktop ? desktopMediaUrl(storageKey) : URL.createObjectURL(blob);
     objectUrls.set(storageKey, url);

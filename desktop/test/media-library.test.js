@@ -36,6 +36,25 @@ test("相同内容共享物理文件，最后一个映射删除时才进入回�
     });
 });
 
+test("媒体文件按来源、类型和日期分层保存", async () => {
+    await withLibrary(async (library) => {
+        const external = await library.put("image:external", Buffer.from("external"), { mimeType: "image/png", origin: "external" });
+        const generated = await library.put("video:generated", Buffer.from("generated"), { mimeType: "video/mp4", origin: "generated" });
+        assert.match(external.path, /^external\/images\/\d{4}-\d{2}\//);
+        assert.match(generated.path, /^generated\/videos\/\d{4}-\d{2}\//);
+        assert.strictEqual(external.origin, "external");
+        assert.strictEqual(generated.origin, "generated");
+    });
+});
+
+test("不同来源的相同内容不共享物理文件", async () => {
+    await withLibrary(async (library) => {
+        const external = await library.put("image:external-copy", Buffer.from("same"), { mimeType: "image/png", origin: "external" });
+        const generated = await library.put("image:generated-copy", Buffer.from("same"), { mimeType: "image/png", origin: "generated" });
+        assert.notStrictEqual(external.path, generated.path);
+    });
+});
+
 test("相同 storageKey 内容冲突时拒绝覆盖", async () => {
     await withLibrary(async (library) => {
         await library.put("video:item", Buffer.from("one"), { mimeType: "video/mp4" });

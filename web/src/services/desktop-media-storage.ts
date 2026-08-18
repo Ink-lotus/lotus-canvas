@@ -1,6 +1,9 @@
+export type MediaOrigin = "external" | "generated";
+
 export type DesktopMediaEntry = {
     storageKey: string;
     path: string;
+    origin?: MediaOrigin;
     kind: "image" | "video" | "audio" | "file";
     mimeType: string;
     bytes: number;
@@ -27,12 +30,13 @@ export function desktopMediaUrl(storageKey: string) {
     return `${desktopOrigin()}${MEDIA_ROUTE}/files/${encodeURIComponent(storageKey)}`;
 }
 
-export async function putDesktopMedia(storageKey: string, blob: Blob, suggestedName = "", signal?: AbortSignal) {
+export async function putDesktopMedia(storageKey: string, blob: Blob, suggestedName = "", signal?: AbortSignal, origin: MediaOrigin = "external") {
     const response = await fetch(desktopMediaUrl(storageKey), {
         method: "PUT",
         headers: {
             "Content-Type": blob.type || "application/octet-stream",
             ...(suggestedName ? { "X-Lotus-File-Name": encodeURIComponent(suggestedName) } : {}),
+            "X-Lotus-Media-Origin": origin,
         },
         body: blob,
         signal,

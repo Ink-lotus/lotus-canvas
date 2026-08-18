@@ -105,10 +105,10 @@ function videoPluginResult(result: unknown): VideoGenerationResult {
 }
 
 export async function storeGeneratedVideo(result: VideoGenerationResult): Promise<UploadedFile> {
-    if (result.blob) return uploadMediaFile(result.blob, "video");
+    if (result.blob) return uploadMediaFile(result.blob, "video", { origin: "generated" });
     if (result.url) {
         try {
-            return await uploadMediaFile(result.url, "video");
+            return await uploadMediaFile(result.url, "video", { origin: "generated" });
         } catch {
             return { url: result.url, storageKey: "", bytes: 0, mimeType: result.mimeType || "video/mp4" };
         }

@@ -10,7 +10,9 @@ const { pipeline } = require("node:stream/promises");
 const MANIFEST_FILE = ".lotus-media-index.json";
 const MANIFEST_BACKUP_FILE = ".lotus-media-index.backup.json";
 const MANIFEST_VERSION = 1;
+const DEFAULT_MEDIA_ORIGIN = "external";
 const STORAGE_KEY_PATTERN = /^[a-z][a-z0-9-]{0,31}:[A-Za-z0-9_-]{1,96}$/;
+const MEDIA_ORIGINS = new Set(["external", "generated"]);
 
 class MediaLibrary {
     constructor(rootDir) {
@@ -23,6 +25,7 @@ class MediaLibrary {
 
     async put(storageKey, body, options = {}) {
         validateStorageKey(storageKey);
+        const origin = normalizeMediaOrigin(options.origin);
         if (!body) throw mediaError("EMPTY_BODY", "媒体内容为空");
         const tempDir = path.join(this.rootDir, ".tmp");
         await fsp.mkdir(tempDir, { recursive: true });
@@ -40,7 +43,7 @@ class MediaLibrary {
             await pipeline(toNodeStream(body), inspect, fs.createWriteStream(tempPath, { flags: "wx" }));
             if (!bytes) throw mediaError("EMPTY_BODY", "媒体内容为空");
             const sha256 = digest.digest("hex");
-            return await this.serialize(() => this.commitTempFile(storageKey, tempPath, { ...options, bytes, sha256 }));
+            return await this.serialize(() => this.commitTempFile(storageKey, tempPath, { ...options, origin, bytes, sha256 }));
         } catch (error) {
             await fsp.rm(tempPath, { force: true }).catch(() => undefined);
             throw error;
@@ -56,7 +59,7 @@ class MediaLibrary {
         try {
             const stat = await fsp.stat(filePath);
             if (!stat.isFile()) return null;
-            return { ...entry, storageKey, filePath };
+            return { ...entry, origin: entry.origin || DEFAULT_MEDIA_ORIGIN, storageKey, filePath };
         } catch {
             return null;
         }
@@ -120,14 +123,15 @@ class MediaLibrary {
             const existingPath = resolveEntryPath(this.rootDir, existing.path);
             if (fs.existsSync(existingPath)) {
                 await fsp.rm(tempPath, { force: true });
-                return { ...existing, storageKey };
+                return { ...existing, origin: existing.origin || DEFAULT_MEDIA_ORIGIN, storageKey };
             }
             manifest = cloneManifest(manifest);
             delete manifest.entries[storageKey];
         }
 
         const kind = mediaKind(options.mimeType, storageKey);
-        const duplicate = Object.values(manifest.entries).find((entry) => entry.kind === kind && entry.sha256 === options.sha256 && fs.existsSync(resolveEntryPath(this.rootDir, entry.path)));
+        const origin = options.origin;
+        const duplicate = Object.values(manifest.entries).find((entry) => entry.origin === origin && entry.kind === kind && entry.sha256 === options.sha256 && fs.existsSync(resolveEntryPath(this.rootDir, entry.path)));
         const next = cloneManifest(manifest);
         let relativePath = duplicate?.path;
         let committedPath = "";
@@ -138,7 +142,7 @@ class MediaLibrary {
             const baseName = safeBaseName(options.suggestedName) || kind;
             const extension = mediaExtension(options.mimeType, kind);
             const stamp = now.toISOString().replace(/[-:]/g, "").replace("T", "-").slice(0, 15);
-            relativePath = path.posix.join(`${kind}s`, month, `${stamp}_${baseName}_${shortId}.${extension}`);
+            relativePath = path.posix.join(origin, `${kind}s`, month, `${stamp}_${baseName}_${shortId}.${extension}`);
             committedPath = resolveEntryPath(this.rootDir, relativePath);
             await fsp.mkdir(path.dirname(committedPath), { recursive: true });
             await fsp.rename(tempPath, committedPath);
@@ -148,6 +152,7 @@ class MediaLibrary {
 
         const entry = {
             path: relativePath,
+            origin,
             kind,
             mimeType: normalizeMimeType(options.mimeType, kind),
             bytes: options.bytes,
@@ -223,7 +228,14 @@ function validateEntry(rootDir, entry) {
     if (!entry || typeof entry !== "object" || typeof entry.path !== "string" || typeof entry.mimeType !== "string" || typeof entry.sha256 !== "string" || !Number.isFinite(entry.bytes)) {
         throw mediaError("INVALID_MANIFEST", "媒体库索引包含无效记录，已拒绝覆盖");
     }
+    if (entry.origin !== undefined && !MEDIA_ORIGINS.has(entry.origin)) throw mediaError("INVALID_MANIFEST", "媒体库索引包含无效来源，已拒绝覆盖");
     resolveEntryPath(rootDir, entry.path);
+}
+
+function normalizeMediaOrigin(value) {
+    const origin = String(value || DEFAULT_MEDIA_ORIGIN);
+    if (!MEDIA_ORIGINS.has(origin)) throw mediaError("INVALID_ORIGIN", "无效的媒体来源");
+    return origin;
 }
 
 function resolveEntryPath(rootDir, relativePath) {
@@ -293,6 +305,7 @@ module.exports = {
     MANIFEST_FILE,
     MANIFEST_VERSION,
     MediaLibrary,
+    normalizeMediaOrigin,
     mediaExtension,
     mediaKind,
     resolveEntryPath,
