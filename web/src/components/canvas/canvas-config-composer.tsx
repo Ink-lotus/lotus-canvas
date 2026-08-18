@@ -213,8 +213,8 @@ function MentionMenu({ inputs, allInputs, activeIndex, theme, onSelect }: { inpu
                 >
                     <ResourcePreview input={input} />
                     <span className="min-w-0 flex-1">
-                        <span className="block font-medium">{resourceLabel(input, allInputs)}</span>
-                        <span className="block truncate opacity-65">{input.text || input.title}</span>
+                        <span className="block truncate font-medium">{input.title || resourceLabel(input, allInputs)}</span>
+                        <span className="block truncate opacity-65">{input.text || resourceLabel(input, allInputs)}</span>
                     </span>
                 </button>
             ))}
@@ -255,7 +255,7 @@ function createReferenceChip(input: NodeGenerationInput, inputs: NodeGenerationI
         wrapper.title = input.text || input.title;
         const text = document.createElement("span");
         text.className = "block truncate";
-        text.textContent = input.type === "text" ? input.text || input.title : input.title;
+        text.textContent = input.type === "text" ? input.title || resourceLabel(input, inputs) : input.title;
         wrapper.appendChild(text);
     }
     return wrapper;

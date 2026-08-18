@@ -405,6 +405,11 @@ function AssetCard({ asset, theme, onInsert, onRemove }: { asset: Asset; theme: 
     return (
         <div className="group relative aspect-square overflow-hidden rounded-xl border transition duration-200 hover:-translate-y-0.5 hover:shadow-lg" style={{ borderColor: theme.node.stroke, background: theme.node.panel }}>
             <AssetCover asset={asset} />
+            <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 px-2 py-1.5 backdrop-blur-sm" style={{ background: `${theme.toolbar.panel}e6`, color: theme.node.text }}>
+                <div className="truncate text-[11px] font-medium" title={asset.title}>
+                    {asset.title}
+                </div>
+            </div>
             <div className="absolute inset-0 flex items-center justify-center gap-2.5 opacity-0 transition duration-200 group-hover:opacity-100">
                 <button
                     type="button"

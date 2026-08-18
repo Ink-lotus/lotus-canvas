@@ -269,8 +269,8 @@ function MentionMenu({ textarea, caretIndex, references, activeIndex, theme, onS
                 >
                     <ReferencePreview reference={reference} />
                     <span className="min-w-0 flex-1">
-                        <span className="block font-medium">{reference.label}</span>
-                        <span className="block truncate opacity-65">{reference.text || reference.title}</span>
+                        <span className="block truncate font-medium">{reference.title || reference.label}</span>
+                        <span className="block truncate opacity-65">{reference.text || reference.label}</span>
                     </span>
                 </button>
             ))}

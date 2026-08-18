@@ -251,8 +251,8 @@ function MentionMenu({ rect, references, activeIndex, theme, onSelect }: { rect:
                 >
                     <ReferencePreview reference={reference} />
                     <span className="min-w-0 flex-1">
-                        <span className="block font-medium">{reference.label}</span>
-                        <span className="block truncate opacity-65">{reference.text || reference.title}</span>
+                        <span className="block truncate font-medium">{reference.title || reference.label}</span>
+                        <span className="block truncate opacity-65">{reference.text || reference.label}</span>
                     </span>
                 </button>
             ))}
@@ -294,7 +294,7 @@ function createReferenceChip(reference: CanvasResourceReference, theme: (typeof 
         wrapper.title = reference.text || reference.title;
         const text = document.createElement("span");
         text.className = "block truncate";
-        text.textContent = reference.kind === "text" ? reference.text || reference.title : reference.label;
+        text.textContent = reference.kind === "text" ? reference.title || reference.label : reference.label;
         wrapper.appendChild(text);
     }
     return wrapper;
