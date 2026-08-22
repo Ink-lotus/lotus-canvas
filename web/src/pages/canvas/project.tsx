@@ -1687,7 +1687,7 @@ function InfiniteCanvasPage() {
         async (node: CanvasNodeData, payload: CanvasImageMaskEditPayload) => {
             if (!node.metadata?.content) return;
             const generationConfig = { ...buildGenerationConfig(effectiveConfig, node, "image"), count: "1", size: node.metadata?.size || "auto" };
-            if (!isAiConfigReady(generationConfig, generationConfig.model) || (mode === "image" && generationConfig.imageModelTargets.some((target) => !isAiConfigReady(generationConfig, target)))) {
+            if (!isAiConfigReady(generationConfig, generationConfig.model) || generationConfig.imageModelTargets.some((target) => !isAiConfigReady(generationConfig, target))) {
                 openConfigDialog(true);
                 return;
             }

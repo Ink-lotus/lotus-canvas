@@ -343,7 +343,7 @@ export default function ImagePage() {
         return { text, config: { ...effectiveConfig, model, imageModelTargets: modelTargets, count: "1" }, targets: modelTargets, references: [...references], outputCount };
     };
 
-    const runGenerationSlot = async (index: number, snapshot: { text: string; config: AiConfig; targets: string[]; references: ReferenceImage[]; outputCount: number }) => {
+    const runGenerationSlot = async (index: number, snapshot: { text: string; config: AiConfig; targets: string[]; references: ReferenceImage[]; outputCount: number }): Promise<GeneratedImage> => {
         const itemStartedAt = performance.now();
         try {
             const scheduled = await scheduleImageGeneration(
@@ -359,7 +359,7 @@ export default function ImagePage() {
             const image = result[0];
             if (!image) throw new Error(t("imageWorkbench.missingResult"));
             const meta = await readImageMeta(image.dataUrl);
-            const nextImage = { id: image.id, dataUrl: image.dataUrl, durationMs: performance.now() - itemStartedAt, width: meta.width, height: meta.height, bytes: getDataUrlByteSize(image.dataUrl), model: scheduled.target };
+            const nextImage: GeneratedImage = { id: image.id, dataUrl: image.dataUrl, durationMs: performance.now() - itemStartedAt, width: meta.width, height: meta.height, bytes: getDataUrlByteSize(image.dataUrl), model: scheduled.target };
             setResults((value) => updateResultAt(value, index, { status: "success", image: nextImage }));
             return nextImage;
         } catch (error) {

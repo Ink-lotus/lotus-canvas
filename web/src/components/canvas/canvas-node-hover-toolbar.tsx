@@ -274,8 +274,7 @@ export function CanvasNodeInfoModal({ node, open, onClose }: { node: CanvasNodeD
                             {imageChannel ? <InfoRow label={t("canvas.nodeToolbar.channel")} value={imageChannel} /> : null}
                             {imageModel ? <InfoRow label={t("canvas.nodeToolbar.model")} value={modelOptionAlias(config, imageModel)} /> : null}
                             {batchCount > 1
-                                ? node.metadata?.images
-                                      .map((image, index) => {
+                                ? node.metadata?.images?.map((image, index) => {
                                           if (!image.model) return null;
                                           const channel = modelOptionChannelName(channels, image.model || "");
                                           const model = modelOptionAlias(config, image.model || "");
