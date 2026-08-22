@@ -92,7 +92,7 @@ jobs:
         working-directory: web
         env:
           LOTUS_DESKTOP_BUILD: '1'
-        run: npm.cmd run build
+        run: .\node_modules\.bin\vite.cmd build
 
       - name: Install desktop dependencies
         working-directory: desktop
