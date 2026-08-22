@@ -77,6 +77,17 @@ jobs:
         working-directory: web
         run: npm ci --legacy-peer-deps
 
+      - name: Verify web build tool
+        working-directory: web
+        shell: pwsh
+        run: |
+          node --version
+          npm --version
+          if (-not (Test-Path 'node_modules/.bin/vite.cmd')) {
+            throw 'Vite executable was not installed.'
+          }
+          npm exec -- vite --version
+
       - name: Build web assets
         working-directory: web
         env:
