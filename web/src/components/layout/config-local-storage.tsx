@@ -92,7 +92,7 @@ export function ConfigLocalStorage({ active }: { active: boolean }) {
                             <div className="flex items-center gap-2 text-sm font-semibold">
                                 <HardDrive className="size-4" />
                                 <span>{t("config.localStorage.library.title")}</span>
-                                {appInfo?.isDesktop && !appInfo.portable ? (
+                                {appInfo?.isDesktop ? (
                                     <Tooltip title={t("config.localStorage.library.change")}>
                                         <Button
                                             type="text"

@@ -55,7 +55,6 @@ const DESKTOP_RELEASE_REPOSITORY = "https://github.com/Ink-lotus/infinite-canvas
 const MEDIA_LIBRARY_CONFIG = "media-library.json";
 
 async function readMediaLibraryPath() {
-    if (PORTABLE) return resolveLibraryDir(app.getPath("userData"));
     const configPath = path.join(app.getPath("userData"), MEDIA_LIBRARY_CONFIG);
     try {
         const parsed = JSON.parse(await fsp.readFile(configPath, "utf8"));
@@ -99,7 +98,6 @@ function registerDesktopIpc() {
     ipcMain.handle("desktop:get-app-info", () => ({ isDesktop: true, portable: PORTABLE, version: app.getVersion(), updateSupported: Boolean(autoUpdater && app.isPackaged && !PORTABLE) }));
     ipcMain.handle("desktop:get-media-library-path", () => mediaLibrary.rootDir);
     ipcMain.handle("desktop:select-media-library", async () => {
-        if (PORTABLE) return null;
         const result = await dialog.showOpenDialog({ properties: ["openDirectory", "createDirectory"] });
         if (result.canceled || !result.filePaths[0]) return null;
         const rootPath = normalizeMediaLibraryDir(result.filePaths[0]);

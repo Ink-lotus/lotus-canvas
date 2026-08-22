@@ -12,7 +12,7 @@
 - GitHub Actions 将产物发布到 `Ink-lotus/infinite-canvas` 的 GitHub Release。
 - 已安装的 NSIS 版本通过 `electron-updater` 检测新版本；只在用户点击“立即更新”后下载，并由用户确认重启安装。
 - 绿色版保持免安装、可拷贝迁移，用户手动替换程序文件即可更新；`data/` 与 exe 同级且必须保留。
-- 安装版应用数据固定保存到 `%APPDATA%\lotus-canvas\data`，默认媒体库为 `%APPDATA%\lotus-canvas\data\library`；用户可在「配置 → 本地存储」修改媒体库位置，绿色版固定使用 exe 同级 `data\library`，卸载时可由用户选择是否删除应用数据。
+- 安装版应用数据固定保存到 `%APPDATA%\lotus-canvas\data`，绿色版应用数据保存到 exe 同级 `data/`；两种版本默认媒体库均为各自 userData 下的 `library`，用户可在「配置 → 本地存储」修改媒体库位置，卸载时可由用户选择是否删除应用数据。
 
 ## 当前基线
 
@@ -135,7 +135,7 @@
 - [x] 启动时检测一次；网络失败只更新状态，不影响主应用使用。
 - [x] 下载完成后由用户确认立即重启安装，绿色版不显示应用内更新入口。
 - [x] 统一绿色版与安装版 userData 结构：绿色版为 exe 同级 `data/`，安装版为 `%APPDATA%\lotus-canvas\data/`。
-- [x] 安装版默认媒体库为 userData 下的 `library/`；配置页提供迁移入口并将自定义位置规范化为 `lotus-canvas/data/library`，绿色版不显示修改入口。
+- [x] 安装版和绿色版默认媒体库均为 userData 下的 `library/`；配置页提供迁移入口并将自定义位置规范化为 `lotus-canvas/data/library`。
 - [ ] 新版本安装后验证 exe 同级 `data/` 仍存在，IndexedDB 和媒体库数据可继续读取。
 - [x] 区分构建发布与客户端更新状态，分别在 CI 和应用界面验收。
 
