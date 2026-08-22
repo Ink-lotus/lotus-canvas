@@ -10,7 +10,10 @@ export type ModelCapability = "image" | "video" | "text" | "audio";
 export type ReasoningEffort = "auto" | "low" | "medium" | "high" | "xhigh";
 
 export type ChannelModel = {
+    /** Actual model identifier sent to this channel. */
     name: string;
+    /** Optional logical name used to group equivalent models across channels. */
+    alias?: string;
     capability: ModelCapability;
     script?: string;
 };
@@ -160,8 +163,10 @@ export function guessCapability(name: string): ModelCapability {
 function findChannelModel(config: AiConfig, value: string): { channel: ModelChannel; model: ChannelModel } | null {
     const decoded = decodeChannelModel(value);
     const name = decoded?.model || value;
-    const channel = decoded ? config.channels.find((item) => item.id === decoded.channelId) : config.channels.find((item) => item.models.some((model) => model.name === name));
-    const model = channel?.models.find((item) => item.name === name);
+    const exactChannel = config.channels.find((item) => item.models.some((model) => model.name === name));
+    const aliasChannel = config.channels.find((item) => item.models.some((model) => model.alias?.trim() === name));
+    const channel = decoded ? config.channels.find((item) => item.id === decoded.channelId) : exactChannel || aliasChannel;
+    const model = channel?.models.find((item) => item.name === name || (!decoded && item.alias?.trim() === name));
     return channel && model ? { channel, model } : null;
 }
 
@@ -287,8 +292,9 @@ export function normalizeChannelModels(models: Array<string | ChannelModel> | un
         if (!name || seen.has(name)) continue;
         seen.add(name);
         const capability = typeof item === "string" ? guessCapability(name) : item.capability || guessCapability(name);
+        const alias = typeof item === "string" ? undefined : item.alias?.trim() || undefined;
         const script = typeof item === "string" ? undefined : item.script?.trim() || undefined;
-        result.push({ name, capability, script });
+        result.push({ name, alias, capability, script });
     }
     return result;
 }
@@ -324,11 +330,19 @@ export function modelOptionName(value: string) {
     return decodeChannelModel(value)?.model || value;
 }
 
+export function modelOptionAlias(config: AiConfig, value: string) {
+    const matched = findChannelModel(config, value);
+    return matched?.model.alias?.trim() || matched?.model.name || modelOptionName(value);
+}
+
 export function modelOptionLabel(config: AiConfig, value: string) {
     const decoded = decodeChannelModel(value);
     if (!decoded) return value;
     const channel = config.channels.find((item) => item.id === decoded.channelId);
-    return channel ? `${decoded.model}（${channel.name}）` : decoded.model;
+    const model = channel?.models.find((item) => item.name === decoded.model);
+    const alias = model?.alias?.trim() || decoded.model;
+    const callName = alias !== decoded.model ? ` · ${decoded.model}` : "";
+    return channel ? `${alias}（${channel.name}${callName}）` : `${alias}${callName}`;
 }
 
 export function modelOptionChannelName(channels: ModelChannel[], value: string) {
@@ -349,8 +363,11 @@ export function normalizeModelOptionValue(value: string | undefined, channels: M
         const channel = channels.find((item) => item.id === decoded.channelId);
         return channel && channel.models.some((item) => item.name === decoded.model) ? model : "";
     }
-    const channel = channels.find((item) => item.models.some((entry) => entry.name === model)) || channels[0];
-    return channel && channel.models.some((item) => item.name === model) ? encodeChannelModel(channel.id, model) : model;
+    const exactChannel = channels.find((item) => item.models.some((entry) => entry.name === model));
+    if (exactChannel) return encodeChannelModel(exactChannel.id, model);
+    const aliasChannel = channels.find((item) => item.models.some((entry) => entry.alias?.trim() === model));
+    const aliasModel = aliasChannel?.models.find((entry) => entry.alias?.trim() === model);
+    return aliasChannel && aliasModel ? encodeChannelModel(aliasChannel.id, aliasModel.name) : model;
 }
 
 export function resolveModelChannel(config: AiConfig, value: string) {
@@ -361,10 +378,11 @@ export function resolveModelChannel(config: AiConfig, value: string) {
 }
 
 export function resolveModelRequestConfig(config: AiConfig, value: string) {
-    const channel = resolveModelChannel(config, value);
+    const matched = findChannelModel(config, value);
+    const channel = matched?.channel || resolveModelChannel(config, value);
     return {
         ...config,
-        model: modelOptionName(value || config.model),
+        model: matched?.model.name || modelOptionName(value || config.model),
         baseUrl: channel.baseUrl,
         apiKey: channel.apiKey,
         apiFormat: channel.apiFormat,
@@ -379,8 +397,13 @@ export function normalizeImageModelTargets(primary: string, targets: string[] | 
         return Boolean(decoded && channel?.models.some((model) => model.name === decoded.model && model.capability === "image"));
     };
     const selected = Array.from(new Set((Array.isArray(targets) ? targets : []).map((value) => normalizeModelOptionValue(value, channels)).filter(isImageTarget)));
-    const modelName = modelOptionName(selected[0] || normalizedPrimary);
-    const normalized = selected.filter((value) => modelOptionName(value) === modelName);
+    const aliasOf = (value: string) => {
+        const decoded = decodeChannelModel(value);
+        const model = decoded ? channels.find((item) => item.id === decoded.channelId)?.models.find((item) => item.name === decoded.model) : undefined;
+        return model?.alias?.trim() || modelOptionName(value);
+    };
+    const modelAlias = aliasOf(selected[0] || normalizedPrimary);
+    const normalized = selected.filter((value) => aliasOf(value) === modelAlias);
     if (normalized.length) return normalized;
     return normalizedPrimary && isImageTarget(normalizedPrimary) ? [normalizedPrimary] : [];
 }

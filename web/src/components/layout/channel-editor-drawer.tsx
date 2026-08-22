@@ -40,6 +40,7 @@ export function ChannelEditorDrawer({ open, channel, onSave, onClose }: { open: 
     };
 
     const setCapability = (name: string, capability: ModelCapability) => setModels(draft.models.map((model) => (model.name === name ? { ...model, capability } : model)));
+    const setAlias = (name: string, alias: string) => setModels(draft.models.map((model) => (model.name === name ? { ...model, alias: alias || undefined } : model)));
     const setScript = (name: string, script: string) => setModels(draft.models.map((model) => (model.name === name ? { ...model, script: script || undefined } : model)));
     const removeModel = (name: string) => setModels(draft.models.filter((model) => model.name !== name));
 
@@ -101,10 +102,11 @@ export function ChannelEditorDrawer({ open, channel, onSave, onClose }: { open: 
             <div className="space-y-2 rounded-lg border border-stone-200 p-2 dark:border-stone-800">
                 {draft.models.length ? (
                     draft.models.map((model) => (
-                        <div key={model.name} className="flex flex-wrap items-center gap-3 rounded-md px-2 py-1.5 hover:bg-stone-50 dark:hover:bg-stone-900/40">
-                            <span className="min-w-0 flex-1 truncate text-sm" title={model.name}>
-                                {model.name}
-                            </span>
+                        <div key={model.name} className="flex flex-wrap items-center gap-3 rounded-md px-2 py-2 hover:bg-stone-50 dark:hover:bg-stone-900/40">
+                            <div className="min-w-0 flex-1 basis-52">
+                                <div className="truncate text-sm" title={model.name}>{model.name}</div>
+                                <Input size="small" className="mt-1" value={model.alias || ""} placeholder={t("config.channelEditor.aliasPlaceholder")} aria-label={t("config.channelEditor.alias")} onChange={(event) => setAlias(model.name, event.target.value)} />
+                            </div>
                             <div className="flex shrink-0 items-center gap-2">
                                 <Segmented size="small" value={model.capability} options={capabilityOptions} onChange={(value) => setCapability(model.name, value as ModelCapability)} />
                                 <Button size="small" type={model.script ? "primary" : "default"} ghost={Boolean(model.script)} onClick={() => setScriptTarget({ name: model.name, capability: model.capability, value: model.script || "" })}>

@@ -2,15 +2,16 @@ import type { SyntheticEvent } from "react";
 import { useTranslation } from "react-i18next";
 
 import { cn } from "@/lib/utils";
-import { modelOptionChannelName, modelOptionName, useConfigStore } from "@/stores/use-config-store";
+import { modelOptionAlias, modelOptionChannelName, useConfigStore } from "@/stores/use-config-store";
 
 export function ImageChannelBadge({ model, pinned, onPinnedChange, className }: { model?: string; pinned: boolean; onPinnedChange: (pinned: boolean) => void; className?: string }) {
     const { t } = useTranslation();
-    const channels = useConfigStore((state) => state.config.channels);
+    const config = useConfigStore((state) => state.config);
+    const channels = config.channels;
     const channelName = modelOptionChannelName(channels, model || "");
     if (!channelName || !model) return null;
 
-    const modelName = modelOptionName(model);
+    const modelName = modelOptionAlias(config, model);
     const title = t(pinned ? "imageChannelBadge.autoHide" : "imageChannelBadge.showAlways", { channel: channelName, model: modelName });
     const stopPropagation = (event: SyntheticEvent) => event.stopPropagation();
 

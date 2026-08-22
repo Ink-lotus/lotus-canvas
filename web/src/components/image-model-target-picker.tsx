@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState, type SyntheticEvent } from "react
 import { useTranslation } from "react-i18next";
 
 import { cn } from "@/lib/utils";
-import { decodeChannelModel, modelOptionName, normalizeImageModelTargets, selectableModelsByCapability, type AiConfig } from "@/stores/use-config-store";
+import { decodeChannelModel, modelOptionAlias, modelOptionName, normalizeImageModelTargets, selectableModelsByCapability, type AiConfig } from "@/stores/use-config-store";
 
 type ImageModelTargetPickerProps = {
     config: AiConfig;
@@ -21,12 +21,15 @@ export function ImageModelTargetPicker({ config, value, onChange, className, ful
     const [open, setOpen] = useState(false);
     const options = useMemo(() => selectableModelsByCapability(config, "image"), [config]);
     const selected = normalizeImageModelTargets(value?.[0] || config.imageModel, value, config.channels);
-    const currentName = modelOptionName(selected[0] || "");
+    const currentName = modelOptionAlias(config, selected[0] || "");
     const groups = useMemo(() => {
         const result = new Map<string, string[]>();
-        options.forEach((option) => result.set(modelOptionName(option), [...(result.get(modelOptionName(option)) || []), option]));
+        options.forEach((option) => {
+            const modelName = modelOptionAlias(config, option);
+            result.set(modelName, [...(result.get(modelName) || []), option]);
+        });
         return Array.from(result.entries());
-    }, [options]);
+    }, [config, options]);
     const stopPropagation = (event: SyntheticEvent) => event.stopPropagation();
 
     useEffect(() => {
@@ -42,7 +45,7 @@ export function ImageModelTargetPicker({ config, value, onChange, className, ful
     }, [open]);
 
     const toggle = (target: string, checked: boolean) => {
-        const nextModelName = modelOptionName(target);
+        const nextModelName = modelOptionAlias(config, target);
         if (nextModelName !== currentName) return void onChange([target]);
         if (checked) return void onChange(normalizeImageModelTargets(selected[0] || target, [...selected, target], config.channels));
         const next = selected.filter((item) => item !== target);
@@ -61,7 +64,7 @@ export function ImageModelTargetPicker({ config, value, onChange, className, ful
                         return (
                             <label key={target} className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-2 text-sm hover:bg-black/5 dark:hover:bg-white/10">
                                 <Checkbox checked={checked} onChange={(event) => toggle(target, event.target.checked)} />
-                                <span className="min-w-0 flex-1 truncate">{channel?.name || channelId}</span>
+                                <span className="min-w-0 flex-1 truncate" title={modelOptionName(target)}>{channel?.name || channelId} · {modelOptionName(target)}</span>
                                 <span className="shrink-0 text-xs text-stone-500">{t("imageChannelPicker.concurrency", { count: channel?.maxConcurrency || 1 })}</span>
                             </label>
                         );
