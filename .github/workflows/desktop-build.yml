@@ -35,6 +35,7 @@ jobs:
     env:
       DESKTOP_RELEASE: ${{ startsWith(github.ref, 'refs/tags/desktop-v') || inputs.publish }}
       DESKTOP_REPLACE_EXISTING: ${{ inputs.replace_existing == true && inputs.publish == true }}
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
     steps:
       - name: Check out source
         uses: actions/checkout@v4
@@ -88,42 +89,9 @@ jobs:
         working-directory: desktop
         run: npm test
 
-      - name: Prepare Windows signing certificate
-        if: env.DESKTOP_RELEASE == 'true'
-        shell: pwsh
-        env:
-          WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
-          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
-        run: |
-          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_BASE64) -or [string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_PASSWORD)) {
-            throw '正式桌面发布必须配置 WINDOWS_CERTIFICATE_BASE64 与 WINDOWS_CERTIFICATE_PASSWORD。'
-          }
-          $certificatePath = Join-Path $env:RUNNER_TEMP 'lotus-canvas-signing.p12'
-          [IO.File]::WriteAllBytes($certificatePath, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE_BASE64))
-          "CSC_LINK=$certificatePath" >> $env:GITHUB_ENV
-          "CSC_KEY_PASSWORD=$env:WINDOWS_CERTIFICATE_PASSWORD" >> $env:GITHUB_ENV
-          "LOTUS_CERTIFICATE_PATH=$certificatePath" >> $env:GITHUB_ENV
-
-      - name: Build Electron packages
+      - name: Build unsigned Electron packages
         working-directory: desktop
         run: npm run build
-
-      - name: Verify Windows signatures
-        if: env.DESKTOP_RELEASE == 'true'
-        shell: pwsh
-        working-directory: desktop
-        run: |
-          $paths = @(
-            (Join-Path $PWD 'release/lotus-canvas-*.exe'),
-            (Join-Path $PWD 'release/win-unpacked/lotus-canvas.exe')
-          )
-          $files = foreach ($pattern in $paths) { Get-ChildItem -Path $pattern -File -ErrorAction Stop }
-          foreach ($file in $files) {
-            $signature = Get-AuthenticodeSignature -FilePath $file.FullName
-            if ($signature.Status -ne 'Valid') {
-              throw "未通过签名验证：$($file.Name)，状态：$($signature.Status)"
-            }
-          }
 
       - name: Create portable package
         working-directory: desktop
@@ -132,11 +100,6 @@ jobs:
       - name: Generate SHA-256 checksums
         working-directory: desktop
         run: npm run checksums
-
-      - name: Remove signing certificate
-        if: always() && env.LOTUS_CERTIFICATE_PATH != ''
-        shell: pwsh
-        run: Remove-Item -LiteralPath $env:LOTUS_CERTIFICATE_PATH -Force -ErrorAction SilentlyContinue
 
       - name: Upload validation artifacts
         uses: actions/upload-artifact@v4
@@ -161,6 +124,7 @@ jobs:
         run: |
           $assets = Get-ChildItem release -File | Where-Object { $_.Extension -in @('.exe', '.zip', '.blockmap') -or $_.Name -in @('latest.yml', 'SHA256SUMS.txt') }
           $assetPaths = @($assets | ForEach-Object { $_.FullName })
+          $releaseNotes = "Windows desktop release $env:DESKTOP_VERSION. 当前产物未使用 Authenticode 代码签名，Windows 可能显示未知发布者或 SmartScreen 提示。NSIS 安装版会检测更新，用户确认后下载并重启安装；绿色版请退出应用后替换程序文件并保留 exe 同级 data/。"
           gh release view $env:RELEASE_TAG --repo $env:REPOSITORY *> $null
           if ($LASTEXITCODE -eq 0) {
             if ($env:DESKTOP_REPLACE_EXISTING -ne 'true') {
@@ -170,7 +134,7 @@ jobs:
               gh release delete-asset $env:RELEASE_TAG $asset.Name --repo $env:REPOSITORY --yes 2>$null
             }
             gh release upload $env:RELEASE_TAG --repo $env:REPOSITORY $assetPaths
-            gh release edit $env:RELEASE_TAG --repo $env:REPOSITORY --title "lotus-canvas Desktop $env:DESKTOP_VERSION"
+            gh release edit $env:RELEASE_TAG --repo $env:REPOSITORY --title "lotus-canvas Desktop $env:DESKTOP_VERSION" --notes $releaseNotes
           } else {
-            gh release create $env:RELEASE_TAG --repo $env:REPOSITORY --title "lotus-canvas Desktop $env:DESKTOP_VERSION" --notes "Windows desktop release $env:DESKTOP_VERSION. NSIS 安装版会检测更新，用户确认后下载并重启安装；绿色版请退出应用后替换程序文件并保留 exe 同级 data/。" $assetPaths
+            gh release create $env:RELEASE_TAG --repo $env:REPOSITORY --title "lotus-canvas Desktop $env:DESKTOP_VERSION" --notes $releaseNotes $assetPaths
           }
