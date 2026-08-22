@@ -4,7 +4,7 @@ const { test } = require("node:test");
 const assert = require("node:assert");
 const path = require("node:path");
 
-const { resolveDistDir, resolveLibraryDir, resolveUserDataDir } = require("../src/paths");
+const { isPortableRuntime, resolveDistDir, resolveLibraryDir, resolveUserDataDir } = require("../src/paths");
 
 test("打包态 dist 位于 resources/dist", () => {
     const result = resolveDistDir({
@@ -21,13 +21,24 @@ test("未打包态 dist 位于 ../web/dist", () => {
     assert.strictEqual(result, path.join("D:", "repo", "web", "dist"));
 });
 
-test("打包态用户数据位于 exe 同级 data", () => {
+test("便携标记位于 exe 同级时识别为绿色版", () => {
+    const exePath = path.join("E:", "green", "lotus-canvas.exe");
+    assert.strictEqual(isPortableRuntime({ isPackaged: true, exePath, exists: (value) => value === path.join("E:", "green", "portable.flag") }), true);
+});
+
+test("绿色版用户数据位于 exe 同级 data", () => {
     const result = resolveUserDataDir({
         isPackaged: true,
+        portable: true,
         exePath: path.join("E:", "green", "lotus-canvas.exe"),
         appDir: "ignored",
     });
     assert.strictEqual(result, path.join("E:", "green", "data"));
+});
+
+test("安装版用户数据位于 APPDATA/lotus-canvas", () => {
+    const result = resolveUserDataDir({ isPackaged: true, portable: false, exePath: path.join("C:", "Program Files", "lotus-canvas", "lotus-canvas.exe"), appDataPath: path.join("C:", "Users", "tester", "AppData", "Roaming") });
+    assert.strictEqual(result, path.join("C:", "Users", "tester", "AppData", "Roaming", "lotus-canvas"));
 });
 
 test("未打包态用户数据位于 desktop/data", () => {

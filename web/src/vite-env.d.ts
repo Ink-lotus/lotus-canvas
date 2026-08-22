@@ -1,6 +1,7 @@
 /// <reference types="vite/client" />
 
 declare const __APP_VERSION__: string;
+declare const __DESKTOP_BUILD__: boolean;
 declare const __APP_RELEASES__: import("@/lib/release").ReleaseInfo[];
 
 interface ImportMetaEnv {
@@ -11,4 +12,28 @@ interface ImportMetaEnv {
     readonly VITE_ANALYTICS_GA4_ID?: string;
     // Baidu Analytics site ID
     readonly VITE_ANALYTICS_BAIDU_ID?: string;
+}
+
+type LotusDesktopUpdateState = {
+    status: "idle" | "checking" | "available" | "not-available" | "downloading" | "downloaded" | "error";
+    version?: string;
+    percent?: number;
+    bytesPerSecond?: number;
+    transferred?: number;
+    total?: number;
+    message?: string;
+};
+
+type LotusDesktopApi = {
+    getAppInfo: () => Promise<{ isDesktop: boolean; portable: boolean; version: string; updateSupported: boolean }>;
+    selectMediaLibrary: () => Promise<string | null>;
+    getMediaLibraryPath: () => Promise<string>;
+    checkForUpdates: (releaseTag?: string) => Promise<LotusDesktopUpdateState | null>;
+    downloadUpdate: () => Promise<LotusDesktopUpdateState | null>;
+    quitAndInstall: () => Promise<void>;
+    onUpdateState: (listener: (state: LotusDesktopUpdateState) => void) => () => void;
+};
+
+interface Window {
+    lotusDesktop?: LotusDesktopApi;
 }

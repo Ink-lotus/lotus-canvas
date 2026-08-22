@@ -1,7 +1,10 @@
 "use strict";
 
 const { pathToFileURL } = require("node:url");
-const { app, BrowserWindow, Menu, net, protocol, session, shell, dialog } = require("electron");
+const fs = require("node:fs");
+const fsp = require("node:fs/promises");
+const path = require("node:path");
+const { app, BrowserWindow, Menu, net, protocol, session, shell, dialog, ipcMain } = require("electron");
 
 const { buildCorsResponse, corsHeaderEntries, shouldInterceptUrl } = require("./src/cors");
 const { isExternalUrl } = require("./src/external-navigation");
@@ -9,7 +12,14 @@ const { resolveAppAssetPath } = require("./src/app-protocol");
 const { MediaLibrary } = require("./src/media-library");
 const { createMediaProtocolHandler } = require("./src/media-protocol");
 const { relayDecision, relayRequest } = require("./src/relay");
-const { resolveDistDir, resolveLibraryDir, resolveUserDataDir } = require("./src/paths");
+const { isPortableRuntime, resolveDistDir, resolveLibraryDir, resolveUserDataDir } = require("./src/paths");
+
+let autoUpdater;
+try {
+    ({ autoUpdater } = require("electron-updater"));
+} catch {
+    autoUpdater = null;
+}
 
 const APP_SCHEME = "app";
 // 主机名 canvas 构成 origin，不可更改：改动后 IndexedDB 视为不同来源，画布与素材将全部读不到
@@ -24,10 +34,12 @@ protocol.registerSchemesAsPrivileged([
     },
 ]);
 
+const PORTABLE = isPortableRuntime({ isPackaged: app.isPackaged, exePath: app.getPath("exe") });
+
 // 必须在任何 session 创建之前调用
 app.setPath(
     "userData",
-    resolveUserDataDir({ isPackaged: app.isPackaged, exePath: app.getPath("exe"), appDir: __dirname }),
+    resolveUserDataDir({ isPackaged: app.isPackaged, portable: PORTABLE, exePath: app.getPath("exe"), appDir: __dirname, appDataPath: app.getPath("appData") }),
 );
 
 const DIST_DIR = resolveDistDir({
@@ -35,8 +47,90 @@ const DIST_DIR = resolveDistDir({
     resourcesPath: process.resourcesPath,
     appDir: __dirname,
 });
-const mediaLibrary = new MediaLibrary(resolveLibraryDir(app.getPath("userData")));
-const handleMediaRequest = createMediaProtocolHandler({ library: mediaLibrary, shell });
+let mediaLibrary;
+let handleMediaRequest;
+let mainWindow;
+let updateState = { status: "idle" };
+const DESKTOP_RELEASE_REPOSITORY = "https://github.com/Ink-lotus/infinite-canvas/releases/download";
+
+const MEDIA_LIBRARY_CONFIG = "media-library.json";
+
+async function readMediaLibraryPath() {
+    if (PORTABLE) return resolveLibraryDir(app.getPath("userData"));
+    const configPath = path.join(app.getPath("userData"), MEDIA_LIBRARY_CONFIG);
+    try {
+        const parsed = JSON.parse(await fsp.readFile(configPath, "utf8"));
+        if (typeof parsed.path === "string" && parsed.path.trim()) return path.resolve(parsed.path);
+    } catch {
+        // First run or an invalid config falls back to the app data directory.
+    }
+    return resolveLibraryDir(app.getPath("userData"));
+}
+
+async function saveMediaLibraryPath(rootPath) {
+    const configPath = path.join(app.getPath("userData"), MEDIA_LIBRARY_CONFIG);
+    await fsp.mkdir(path.dirname(configPath), { recursive: true });
+    await fsp.writeFile(configPath, `${JSON.stringify({ path: rootPath }, null, 2)}\n`, "utf8");
+}
+
+async function initializeMediaLibrary() {
+    let rootPath = await readMediaLibraryPath();
+    if (app.isPackaged && !PORTABLE && !fs.existsSync(path.join(app.getPath("userData"), MEDIA_LIBRARY_CONFIG))) {
+        const result = await dialog.showOpenDialog({ properties: ["openDirectory", "createDirectory"] });
+        if (!result.canceled && result.filePaths[0]) rootPath = path.resolve(result.filePaths[0]);
+        await saveMediaLibraryPath(rootPath);
+    }
+    mediaLibrary = new MediaLibrary(rootPath);
+    handleMediaRequest = createMediaProtocolHandler({ library: mediaLibrary, shell });
+}
+
+function sendUpdateState(next) {
+    updateState = { ...updateState, ...next };
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("desktop:update-state", updateState);
+}
+
+function configureUpdater() {
+    if (!autoUpdater || !app.isPackaged || PORTABLE) return;
+    autoUpdater.autoDownload = false;
+    autoUpdater.autoInstallOnAppQuit = false;
+    autoUpdater.on("checking-for-update", () => sendUpdateState({ status: "checking" }));
+    autoUpdater.on("update-available", (info) => sendUpdateState({ status: "available", version: info.version }));
+    autoUpdater.on("update-not-available", (info) => sendUpdateState({ status: "not-available", version: info.version }));
+    autoUpdater.on("download-progress", (progress) => sendUpdateState({ status: "downloading", percent: progress.percent, bytesPerSecond: progress.bytesPerSecond, transferred: progress.transferred, total: progress.total }));
+    autoUpdater.on("update-downloaded", (info) => sendUpdateState({ status: "downloaded", version: info.version, percent: 100 }));
+    autoUpdater.on("error", (error) => sendUpdateState({ status: "error", message: error?.message || String(error) }));
+}
+
+function registerDesktopIpc() {
+    ipcMain.handle("desktop:get-app-info", () => ({ isDesktop: true, portable: PORTABLE, version: app.getVersion(), updateSupported: Boolean(autoUpdater && app.isPackaged && !PORTABLE) }));
+    ipcMain.handle("desktop:get-media-library-path", () => mediaLibrary.rootDir);
+    ipcMain.handle("desktop:select-media-library", async () => {
+        if (PORTABLE) return mediaLibrary.rootDir;
+        const result = await dialog.showOpenDialog({ properties: ["openDirectory", "createDirectory"] });
+        if (result.canceled || !result.filePaths[0]) return null;
+        const rootPath = path.resolve(result.filePaths[0]);
+        mediaLibrary = new MediaLibrary(rootPath);
+        handleMediaRequest = createMediaProtocolHandler({ library: mediaLibrary, shell });
+        await saveMediaLibraryPath(rootPath);
+        return rootPath;
+    });
+    ipcMain.handle("desktop:check-for-updates", async (_event, releaseTag) => {
+        if (!autoUpdater || PORTABLE || !app.isPackaged) return null;
+        if (typeof releaseTag === "string" && /^desktop-v\\d+\\.\\d+\\.\\d+$/.test(releaseTag)) {
+            autoUpdater.setFeedURL({ provider: "generic", url: `${DESKTOP_RELEASE_REPOSITORY}/${releaseTag}/` });
+        }
+        const result = await autoUpdater.checkForUpdates();
+        return { ...updateState, version: result?.updateInfo?.version };
+    });
+    ipcMain.handle("desktop:download-update", async () => {
+        if (!autoUpdater || PORTABLE || !app.isPackaged) return null;
+        await autoUpdater.downloadUpdate();
+        return updateState;
+    });
+    ipcMain.handle("desktop:quit-and-install", () => {
+        if (autoUpdater && updateState.status === "downloaded") autoUpdater.quitAndInstall(false, true);
+    });
+}
 
 function registerCorsInterceptor() {
     session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
@@ -61,7 +155,7 @@ function registerCorsInterceptor() {
 
 function registerAppProtocol() {
     protocol.handle(APP_SCHEME, async (request) => {
-        const mediaResponse = await handleMediaRequest(request);
+        const mediaResponse = handleMediaRequest ? await handleMediaRequest(request) : null;
         if (mediaResponse) return mediaResponse;
         const { pathname } = new URL(request.url);
         const filePath = resolveAppAssetPath(pathname, DIST_DIR);
@@ -120,8 +214,10 @@ function createWindow() {
             webSecurity: true,
             contextIsolation: true,
             nodeIntegration: false,
+            preload: path.join(__dirname, "preload.js"),
         },
     });
+    mainWindow = win;
     win.once("ready-to-show", () => win.show());
     // 前端 target="_blank" / window.open 的外链：拦截并由用户决定是否用默认浏览器打开；
     // 非外链维持 Electron 默认，避免改变壳内其它行为
@@ -151,6 +247,10 @@ app.whenReady().then(() => {
     registerCorsInterceptor();
     registerAppProtocol();
     registerHttpsRelay();
+    registerDesktopIpc();
+    configureUpdater();
+    return initializeMediaLibrary();
+}).then(() => {
     createWindow();
 
     app.on("activate", () => {

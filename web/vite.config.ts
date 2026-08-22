@@ -7,7 +7,9 @@ import { defineConfig, type Plugin } from "vite";
 import { parseChangelog } from "./src/lib/release";
 
 const webDir = dirname(fileURLToPath(import.meta.url));
-const localVersion = readFileSync(resolve(webDir, "../VERSION"), "utf8").trim() || "dev";
+const desktopBuild = process.env.LOTUS_DESKTOP_BUILD === "1";
+const desktopPackage = JSON.parse(readFileSync(resolve(webDir, "../desktop/package.json"), "utf8")) as { version?: string };
+const localVersion = desktopBuild ? desktopPackage.version || "dev" : readFileSync(resolve(webDir, "../VERSION"), "utf8").trim() || "dev";
 const localChangelog = readFileSync(resolve(webDir, "../CHANGELOG.md"), "utf8");
 
 // Expose /plugins/index.json with local plugin files from public/plugins.
@@ -48,6 +50,7 @@ export default defineConfig({
     },
     define: {
         __APP_VERSION__: JSON.stringify(localVersion),
+        __DESKTOP_BUILD__: JSON.stringify(desktopBuild),
         __APP_RELEASES__: JSON.stringify(parseChangelog(localChangelog)),
     },
 });

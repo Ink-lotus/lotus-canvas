@@ -1,14 +1,38 @@
 appId: app.lotuscanvas.desktop
 productName: lotus-canvas
+artifactName: '${productName}-${version}-win-${arch}.${ext}'
+copyright: Copyright (c) Ink-lotus
 directories:
   output: release
+  buildResources: build
 files:
   - main.js
+  - preload.js
   - src/**/*
   - package.json
 extraResources:
   - from: ../web/dist
     to: dist
 win:
+  icon: build/icon.png
   target:
-    - dir
+    - target: nsis
+      arch:
+        - x64
+    - target: dir
+      arch:
+        - x64
+nsis:
+  artifactName: '${productName}-${version}-win-${arch}.${ext}'
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  deleteAppDataOnUninstall: false
+  differentialPackage: true
+  include: build/installer.nsh
+publish:
+  provider: github
+  owner: Ink-lotus
+  repo: infinite-canvas

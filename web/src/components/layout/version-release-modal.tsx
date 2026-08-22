@@ -1,7 +1,8 @@
 import type { CSSProperties } from "react";
-import { Modal, Tag, Timeline } from "antd";
+import { App, Button, Modal, Tag, Timeline } from "antd";
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
+import { Download, RefreshCw } from "lucide-react";
 import { useVersionCheck } from "@/hooks/use-version-check";
 import { APP_VERSION } from "@/constant/env";
 
@@ -25,7 +26,19 @@ type VersionReleaseModalProps = {
 
 export function VersionReleaseModal({ className, style }: VersionReleaseModalProps) {
     const { t } = useTranslation();
-    const { open, setOpen, openReleaseModal, latestVersion, releases, checking, hasNewVersion, checkLatestRelease } = useVersionCheck();
+    const { modal } = App.useApp();
+    const { open, setOpen, openReleaseModal, latestVersion, releases, checking, hasNewVersion, checkLatestRelease, isDesktop, updateSupported, desktopUpdateState, downloadDesktopUpdate, installDesktopUpdate } = useVersionCheck();
+    const downloading = desktopUpdateState.status === "downloading";
+    const downloaded = desktopUpdateState.status === "downloaded";
+    const confirmInstall = () => {
+        modal.confirm({
+            title: t("version.restartInstallTitle"),
+            content: t("version.restartInstallDescription"),
+            okText: t("version.restartInstall"),
+            cancelText: t("common.cancel"),
+            onOk: installDesktopUpdate,
+        });
+    };
 
     return (
         <>
@@ -59,6 +72,20 @@ export function VersionReleaseModal({ className, style }: VersionReleaseModalPro
                             </button>
                         </div>
                         <div className="mt-1 text-base font-semibold text-stone-950 dark:text-stone-100">{latestVersion}</div>
+                        {isDesktop && updateSupported && hasNewVersion ? (
+                            <div className="mt-3 flex flex-wrap items-center gap-2">
+                                {downloaded ? (
+                                    <Button type="primary" size="small" icon={<RefreshCw className="size-3.5" />} onClick={confirmInstall}>
+                                        {t("version.restartInstall")}
+                                    </Button>
+                                ) : (
+                                    <Button type="primary" size="small" icon={<Download className="size-3.5" />} loading={downloading} onClick={() => void downloadDesktopUpdate()}>
+                                        {downloading ? t("version.downloading", { percent: Math.round(desktopUpdateState.percent || 0) }) : t("version.installNow")}
+                                    </Button>
+                                )}
+                                {desktopUpdateState.status === "error" ? <span className="text-xs text-red-500">{desktopUpdateState.message || t("version.downloadFailed")}</span> : null}
+                            </div>
+                        ) : null}
                     </div>
                 </div>
                 <div className="max-h-[56vh] overflow-y-auto pr-2">

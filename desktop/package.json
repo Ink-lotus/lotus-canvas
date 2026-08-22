@@ -2,17 +2,38 @@
     "name": "lotus-canvas-desktop",
     "version": "0.1.0",
     "private": true,
-    "description": "Electron 桌面套壳，通过主进程改写响应头消除中转站跨域限制",
+    "productName": "lotus-canvas",
+    "description": "lotus-canvas Windows desktop app",
+    "author": {
+        "name": "Ink-lotus",
+        "url": "https://github.com/Ink-lotus"
+    },
+    "license": "MIT",
+    "homepage": "https://github.com/Ink-lotus/infinite-canvas",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/Ink-lotus/infinite-canvas.git",
+        "directory": "desktop"
+    },
+    "engines": {
+        "node": ">=22"
+    },
     "main": "main.js",
     "scripts": {
         "start": "electron .",
         "test": "node --test test/*.test.js",
-        "build": "electron-builder --config builder.yml",
+        "build": "electron-builder --config builder.yml --publish never",
+        "package:portable": "node scripts/create-portable.js",
+        "checksums": "node scripts/generate-checksums.js",
+        "release:artifacts": "npm run build && npm run package:portable && npm run checksums",
         "deploy": "node scripts/deploy.js",
-        "release": "npm run build && npm run deploy"
+        "release": "npm run release:artifacts"
     },
     "devDependencies": {
         "electron": "43.2.0",
         "electron-builder": "26.15.3"
+    },
+    "dependencies": {
+        "electron-updater": "6.8.9"
     }
 }

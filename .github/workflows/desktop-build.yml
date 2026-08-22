@@ -1,0 +1,176 @@
+name: Desktop Windows Build
+
+on:
+  push:
+    branches:
+      - '**'
+    tags:
+      - 'desktop-v*'
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish a release for the current desktop-v* tag
+        required: true
+        default: false
+        type: boolean
+      replace_existing:
+        description: Explicitly replace an existing release and its assets
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: windows-latest
+    permissions:
+      contents: ${{ (startsWith(github.ref, 'refs/tags/desktop-v') || inputs.publish) && 'write' || 'read' }}
+    env:
+      DESKTOP_RELEASE: ${{ startsWith(github.ref, 'refs/tags/desktop-v') || inputs.publish }}
+      DESKTOP_REPLACE_EXISTING: ${{ inputs.replace_existing == true && inputs.publish == true }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            web/package-lock.json
+            desktop/package-lock.json
+
+      - name: Validate desktop tag
+        shell: pwsh
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          PUBLISH_INPUT: ${{ inputs.publish }}
+        run: |
+          $version = node -p "require('./desktop/package.json').version"
+          $isTagRelease = $env:REF_TYPE -eq 'tag' -and $env:REF_NAME -like 'desktop-v*'
+          $isManualRelease = $env:PUBLISH_INPUT -eq 'true'
+          if ($isManualRelease -and -not $isTagRelease) {
+            throw 'workflow_dispatch 发布必须从 desktop-v<version> tag 运行。'
+          }
+          if ($isTagRelease) {
+            $tagVersion = $env:REF_NAME.Substring('desktop-v'.Length)
+            if ([string]::IsNullOrWhiteSpace($tagVersion) -or $tagVersion -ne $version) {
+              throw "Tag $($env:REF_NAME) 与 desktop/package.json 版本 $version 不一致。"
+            }
+          }
+          "DESKTOP_VERSION=$version" >> $env:GITHUB_ENV
+          "RELEASE_TAG=$($env:REF_NAME)" >> $env:GITHUB_ENV
+
+      - name: Install web dependencies
+        working-directory: web
+        run: npm ci
+
+      - name: Build web assets
+        working-directory: web
+        env:
+          LOTUS_DESKTOP_BUILD: '1'
+        run: npm run build
+
+      - name: Install desktop dependencies
+        working-directory: desktop
+        run: npm ci
+
+      - name: Test desktop
+        working-directory: desktop
+        run: npm test
+
+      - name: Prepare Windows signing certificate
+        if: env.DESKTOP_RELEASE == 'true'
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_BASE64) -or [string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_PASSWORD)) {
+            throw '正式桌面发布必须配置 WINDOWS_CERTIFICATE_BASE64 与 WINDOWS_CERTIFICATE_PASSWORD。'
+          }
+          $certificatePath = Join-Path $env:RUNNER_TEMP 'lotus-canvas-signing.p12'
+          [IO.File]::WriteAllBytes($certificatePath, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE_BASE64))
+          "CSC_LINK=$certificatePath" >> $env:GITHUB_ENV
+          "CSC_KEY_PASSWORD=$env:WINDOWS_CERTIFICATE_PASSWORD" >> $env:GITHUB_ENV
+          "LOTUS_CERTIFICATE_PATH=$certificatePath" >> $env:GITHUB_ENV
+
+      - name: Build Electron packages
+        working-directory: desktop
+        run: npm run build
+
+      - name: Verify Windows signatures
+        if: env.DESKTOP_RELEASE == 'true'
+        shell: pwsh
+        working-directory: desktop
+        run: |
+          $paths = @(
+            (Join-Path $PWD 'release/lotus-canvas-*.exe'),
+            (Join-Path $PWD 'release/win-unpacked/lotus-canvas.exe')
+          )
+          $files = foreach ($pattern in $paths) { Get-ChildItem -Path $pattern -File -ErrorAction Stop }
+          foreach ($file in $files) {
+            $signature = Get-AuthenticodeSignature -FilePath $file.FullName
+            if ($signature.Status -ne 'Valid') {
+              throw "未通过签名验证：$($file.Name)，状态：$($signature.Status)"
+            }
+          }
+
+      - name: Create portable package
+        working-directory: desktop
+        run: npm run package:portable
+
+      - name: Generate SHA-256 checksums
+        working-directory: desktop
+        run: npm run checksums
+
+      - name: Remove signing certificate
+        if: always() && env.LOTUS_CERTIFICATE_PATH != ''
+        shell: pwsh
+        run: Remove-Item -LiteralPath $env:LOTUS_CERTIFICATE_PATH -Force -ErrorAction SilentlyContinue
+
+      - name: Upload validation artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: lotus-canvas-desktop-${{ env.DESKTOP_VERSION }}
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            desktop/release/*.exe
+            desktop/release/*.zip
+            desktop/release/latest.yml
+            desktop/release/*.blockmap
+            desktop/release/SHA256SUMS.txt
+
+      - name: Publish GitHub Release
+        if: env.DESKTOP_RELEASE == 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+        working-directory: desktop
+        run: |
+          $assets = Get-ChildItem release -File | Where-Object { $_.Extension -in @('.exe', '.zip', '.blockmap') -or $_.Name -in @('latest.yml', 'SHA256SUMS.txt') }
+          $assetPaths = @($assets | ForEach-Object { $_.FullName })
+          gh release view $env:RELEASE_TAG --repo $env:REPOSITORY *> $null
+          if ($LASTEXITCODE -eq 0) {
+            if ($env:DESKTOP_REPLACE_EXISTING -ne 'true') {
+              throw "Release $env:RELEASE_TAG 已存在；如需覆盖，请通过 workflow_dispatch 显式启用 replace_existing。"
+            }
+            foreach ($asset in $assets) {
+              gh release delete-asset $env:RELEASE_TAG $asset.Name --repo $env:REPOSITORY --yes 2>$null
+            }
+            gh release upload $env:RELEASE_TAG --repo $env:REPOSITORY $assetPaths
+            gh release edit $env:RELEASE_TAG --repo $env:REPOSITORY --title "lotus-canvas Desktop $env:DESKTOP_VERSION"
+          } else {
+            gh release create $env:RELEASE_TAG --repo $env:REPOSITORY --title "lotus-canvas Desktop $env:DESKTOP_VERSION" --notes "Windows desktop release $env:DESKTOP_VERSION. NSIS 安装版会检测更新，用户确认后下载并重启安装；绿色版请退出应用后替换程序文件并保留 exe 同级 data/。" $assetPaths
+          }

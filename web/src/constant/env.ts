@@ -1,4 +1,5 @@
 export const APP_VERSION = __APP_VERSION__ || "dev";
+export const IS_DESKTOP_BUILD = __DESKTOP_BUILD__;
 
 export const DOCS_URL = import.meta.env.VITE_DOC_URL || "https://docs.canvas.best";
 
