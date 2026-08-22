@@ -75,7 +75,7 @@ jobs:
 
       - name: Install web dependencies
         working-directory: web
-        run: npm ci --legacy-peer-deps
+        run: npm.cmd ci --legacy-peer-deps
 
       - name: Verify web build tool
         working-directory: web
@@ -86,33 +86,33 @@ jobs:
           if (-not (Test-Path 'node_modules/.bin/vite.cmd')) {
             throw 'Vite executable was not installed.'
           }
-          npm exec -- vite --version
+          npm.cmd exec -- vite --version
 
       - name: Build web assets
         working-directory: web
         env:
           LOTUS_DESKTOP_BUILD: '1'
-        run: npm run build
+        run: npm.cmd run build
 
       - name: Install desktop dependencies
         working-directory: desktop
-        run: npm ci
+        run: npm.cmd ci
 
       - name: Test desktop
         working-directory: desktop
-        run: npm test
+        run: npm.cmd test
 
       - name: Build unsigned Electron packages
         working-directory: desktop
-        run: npm run build
+        run: npm.cmd run build
 
       - name: Create portable package
         working-directory: desktop
-        run: npm run package:portable
+        run: npm.cmd run package:portable
 
       - name: Generate SHA-256 checksums
         working-directory: desktop
-        run: npm run checksums
+        run: npm.cmd run checksums
 
       - name: Upload validation artifacts
         uses: actions/upload-artifact@v4
