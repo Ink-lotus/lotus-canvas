@@ -30,12 +30,12 @@ function isNewerVersion(latestVersion: string, currentVersion: string) {
 
 export function useVersionCheck() {
     const { t } = useTranslation();
-    const currentVersion = APP_VERSION;
     const { message } = App.useApp();
     const localReleases = useMemo(readLocalReleases, []);
     const api = desktopApi();
     const [appInfo, setAppInfo] = useState<{ isDesktop: boolean; portable: boolean; version: string; updateSupported: boolean } | null>(null);
-    const [latestVersion, setLatestVersion] = useState(currentVersion);
+    const currentVersion = IS_DESKTOP_BUILD ? appInfo?.version || APP_VERSION : APP_VERSION;
+    const [latestVersion, setLatestVersion] = useState(APP_VERSION);
     const [releases, setReleases] = useState<ReleaseInfo[]>(localReleases);
     const [checking, setChecking] = useState(false);
     const [open, setOpen] = useState(false);
@@ -155,6 +155,7 @@ export function useVersionCheck() {
         open,
         setOpen,
         openReleaseModal,
+        currentVersion,
         latestVersion,
         releases,
         checking,

@@ -4,7 +4,6 @@ import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import { Download, RefreshCw } from "lucide-react";
 import { useVersionCheck } from "@/hooks/use-version-check";
-import { APP_VERSION } from "@/constant/env";
 
 function getTagColor(type: string) {
     if (type === "新增" || type === "Added") return "green";
@@ -27,7 +26,7 @@ type VersionReleaseModalProps = {
 export function VersionReleaseModal({ className, style }: VersionReleaseModalProps) {
     const { t } = useTranslation();
     const { modal } = App.useApp();
-    const { open, setOpen, openReleaseModal, latestVersion, releases, checking, hasNewVersion, checkLatestRelease, isDesktop, updateSupported, desktopUpdateState, downloadDesktopUpdate, installDesktopUpdate } = useVersionCheck();
+    const { open, setOpen, openReleaseModal, currentVersion, latestVersion, releases, checking, hasNewVersion, checkLatestRelease, isDesktop, updateSupported, desktopUpdateState, downloadDesktopUpdate, installDesktopUpdate } = useVersionCheck();
     const downloading = desktopUpdateState.status === "downloading";
     const downloaded = desktopUpdateState.status === "downloaded";
     const confirmInstall = () => {
@@ -50,7 +49,7 @@ export function VersionReleaseModal({ className, style }: VersionReleaseModalPro
                 title={t("version.viewUpdates")}
             >
                 <span className="relative inline-flex">
-                    {APP_VERSION}
+                    {currentVersion}
                     {hasNewVersion ? <span className="absolute -right-1.5 -top-1 size-1.5 rounded-full bg-green-500" /> : null}
                 </span>
             </button>
@@ -58,7 +57,7 @@ export function VersionReleaseModal({ className, style }: VersionReleaseModalPro
                 <div className="mb-5 grid grid-cols-2 gap-3">
                     <div className="rounded-lg border border-stone-200 p-3 dark:border-stone-800">
                         <div className="text-xs text-stone-500 dark:text-stone-400">{t("version.currentVersion")}</div>
-                        <div className="mt-1 text-base font-semibold text-stone-950 dark:text-stone-100">{APP_VERSION}</div>
+                        <div className="mt-1 text-base font-semibold text-stone-950 dark:text-stone-100">{currentVersion}</div>
                     </div>
                     <div className="rounded-lg border border-stone-200 p-3 dark:border-stone-800">
                         <div className="flex items-center justify-between gap-3">
@@ -98,7 +97,7 @@ export function VersionReleaseModal({ className, style }: VersionReleaseModalPro
                                         <span className="text-xs text-stone-500 dark:text-stone-400">{release.date}</span>
                                         <div className="flex min-w-0 items-center gap-1.5">
                                             {release.version === latestVersion ? <Tag color="green">{t("version.latest")}</Tag> : null}
-                                            {release.version === APP_VERSION ? <Tag>{t("version.current")}</Tag> : null}
+                                            {release.version === currentVersion ? <Tag>{t("version.current")}</Tag> : null}
                                         </div>
                                     </div>
                                     <div className="mt-2 space-y-1.5">
