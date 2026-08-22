@@ -127,7 +127,7 @@ Electron session.webRequest.onHeadersReceived
 
 ### 3. 数据存储
 
-- `app.setPath("userData", path.join(path.dirname(app.getPath("exe")), "data"))`，数据落在 exe 同级 `data/`，整个文件夹可拷走迁移
+- 绿色版通过 `app.setPath("userData", path.join(path.dirname(app.getPath("exe")), "data"))` 将数据落在 exe 同级 `data/`，整个文件夹可拷走迁移；安装版按桌面发布计划保存到 `%APPDATA%\\lotus-canvas\\data`
 - 画布、素材、生成记录仍由前端存 IndexedDB（localforage），无需改动
 
 ### 4. 打包

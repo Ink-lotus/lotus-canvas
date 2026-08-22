@@ -9,7 +9,7 @@ function resolveDistDir({ isPackaged, resourcesPath, appDir }) {
 
 /**
  * 用户数据目录。
- * 打包态放 exe 同级 data/，整个绿色文件夹可拷走迁移。
+ * 绿色版放 exe 同级 data/，安装版放 %APPDATA%/lotus-canvas/data。
  * 未打包态放 desktop/data/，避免写进 node_modules 被重装清除。
  */
 function isPortableRuntime({ isPackaged, exePath, markerName = "portable.flag", exists = require("node:fs").existsSync }) {
@@ -19,7 +19,7 @@ function isPortableRuntime({ isPackaged, exePath, markerName = "portable.flag", 
 function resolveUserDataDir({ isPackaged, portable = false, exePath, appDir, appDataPath }) {
     if (!isPackaged) return path.join(appDir, "data");
     if (portable) return path.join(path.dirname(exePath), "data");
-    return path.join(appDataPath || process.env.APPDATA || path.dirname(exePath), "lotus-canvas");
+    return path.join(appDataPath || process.env.APPDATA || path.dirname(exePath), "lotus-canvas", "data");
 }
 
 function resolveLibraryDir(userDataDir) {

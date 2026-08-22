@@ -1,15 +1,89 @@
-!macro customUnInit
-  ; Electron stores installed-app data in %APPDATA%\lotus-canvas. A separately
-  ; selected media-library directory outside this tree is never touched.
-  ${ifNot} ${isUpdated}
-    ${GetParameters} $R0
-    ${GetOptions} $R0 "/S" $R1
-    ${If} ${Errors}
-      MessageBox MB_YESNO|MB_ICONQUESTION \
-        "Do you also want to delete your lotus-canvas data (canvas, settings, and media)?" \
-        IDNO keep_lotus_data
+﻿Unicode true
+!include nsDialogs.nsh
+!include FileFunc.nsh
+
+Var lotusDirectoryEdit
+Var lotusDirectoryPage
+Var lotusDirectoryPath
+Var lotusDirectoryLeaf
+Var lotusDirectoryLength
+Var lotusDirectoryIndex
+Var lotusDirectoryChar
+
+; Replace the native directory page with a custom NSIS page. This keeps the
+; native folder picker while allowing the normalized path to update immediately.
+!macro customWelcomePage
+  PageEx custom
+    PageCallbacks lotusDirectoryPageCreate lotusDirectoryPageLeave
+  PageExEnd
+!macroend
+
+Function lotusDirectoryPageCreate
+  nsDialogs::Create 1018
+  Pop $lotusDirectoryPage
+  ${NSD_CreateLabel} 0u 0u 300u 30u "安装程序会将 lotus-canvas 安装到所选目录下的 lotus-canvas 文件夹 / The installer will add a lotus-canvas folder under the selected directory."
+  Pop $0
+  ${NSD_CreateText} 0u 42u 300u 14u "$INSTDIR"
+  Pop $lotusDirectoryEdit
+  EnableWindow $lotusDirectoryEdit 0
+  ${NSD_CreateButton} 200u 68u 100u 14u "选择目录 / Browse..."
+  Pop $0
+  ${NSD_OnClick} $0 lotusDirectoryBrowse
+  StrCpy $lotusDirectoryPath $INSTDIR
+  Call lotusDirectoryPageChanged
+  nsDialogs::Show
+FunctionEnd
+
+Function lotusDirectoryPageLeave
+  Call lotusDirectoryPageChanged
+FunctionEnd
+
+Function lotusDirectoryBrowse
+  Pop $0
+  nsDialogs::SelectFolderDialog "选择安装目录 / Select installation directory" "$INSTDIR"
+  Pop $0
+  ${If} $0 != error
+    StrCpy $lotusDirectoryPath $0
+    Call lotusDirectoryPageChanged
+  ${EndIf}
+FunctionEnd
+
+Function lotusDirectoryPageChanged
+  ${If} $lotusDirectoryPath == ""
+    StrCpy $lotusDirectoryPath $INSTDIR
+  ${EndIf}
+  ${If} $lotusDirectoryPath == ""
+    Return
+  ${EndIf}
+
+  ; Remove trailing separators before checking the final directory name.
+  ${Do}
+    StrLen $lotusDirectoryLength $lotusDirectoryPath
+    ${If} $lotusDirectoryLength == 0
+      ${Break}
+    ${EndIf}
+    IntOp $lotusDirectoryIndex $lotusDirectoryLength - 1
+    StrCpy $lotusDirectoryChar $lotusDirectoryPath 1 $lotusDirectoryIndex
+    ${If} $lotusDirectoryChar != "\"
+      ${Break}
+    ${EndIf}
+    StrCpy $lotusDirectoryPath $lotusDirectoryPath $lotusDirectoryIndex
+  ${Loop}
+
+  ${GetFileName} $lotusDirectoryPath $lotusDirectoryLeaf
+  ${If} $lotusDirectoryLeaf != "${APP_FILENAME}"
+    StrCpy $lotusDirectoryPath "$lotusDirectoryPath\${APP_FILENAME}"
+  ${EndIf}
+  StrCpy $INSTDIR $lotusDirectoryPath
+  ${NSD_SetText} $lotusDirectoryEdit $lotusDirectoryPath
+FunctionEnd
+
+; electron-builder adds a native uninstall components page when this macro
+; exists. The optional section is unchecked by default and skips upgrades.
+!macro customUnInstallSection
+  Section /o "删除应用数据（数据库与默认媒体库） / Delete app data (database and default media library)" lotusDeleteAppData
+    ${IfNot} ${isUpdated}
       RMDir /r "$APPDATA\lotus-canvas"
     ${EndIf}
-  ${EndIf}
-  keep_lotus_data:
+  SectionEnd
 !macroend

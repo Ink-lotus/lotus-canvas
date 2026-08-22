@@ -20,6 +20,13 @@ export type DesktopMediaStats = {
     freeBytes: number | null;
 };
 
+export type DesktopAppInfo = {
+    isDesktop: boolean;
+    portable: boolean;
+    version: string;
+    updateSupported: boolean;
+};
+
 const MEDIA_ROUTE = "/__lotus_media__";
 
 export function isDesktopMediaLibrary() {
@@ -76,6 +83,16 @@ export async function readDesktopMediaStats() {
 
 export async function openDesktopMediaLibrary() {
     await assertResponse(await fetch(`${desktopOrigin()}${MEDIA_ROUTE}/open-root`, { method: "POST" }));
+}
+
+export async function selectDesktopMediaLibrary() {
+    const api = window.lotusDesktop;
+    if (!api?.selectMediaLibrary) throw new Error("桌面媒体库设置不可用");
+    return api.selectMediaLibrary();
+}
+
+export async function readDesktopAppInfo(): Promise<DesktopAppInfo | null> {
+    return window.lotusDesktop?.getAppInfo() ?? null;
 }
 
 export async function revealDesktopMedia(storageKey: string) {

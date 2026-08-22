@@ -12,7 +12,7 @@
 - GitHub Actions 将产物发布到 `Ink-lotus/infinite-canvas` 的 GitHub Release。
 - 已安装的 NSIS 版本通过 `electron-updater` 检测新版本；只在用户点击“立即更新”后下载，并由用户确认重启安装。
 - 绿色版保持免安装、可拷贝迁移，用户手动替换程序文件即可更新；`data/` 与 exe 同级且必须保留。
-- 安装版首次启动允许选择媒体库目录，应用数据固定保存到 `%APPDATA%\lotus-canvas`，卸载时可由用户选择是否删除应用数据。
+- 安装版应用数据固定保存到 `%APPDATA%\lotus-canvas\data`，默认媒体库为 `%APPDATA%\lotus-canvas\data\library`；用户可在「配置 → 本地存储」修改媒体库位置，绿色版固定使用 exe 同级 `data\library`，卸载时可由用户选择是否删除应用数据。
 
 ## 当前基线
 
@@ -72,6 +72,7 @@
 - [x] 为 `desktop/package.json` 补充 `author`、应用图标和必要的元数据。
 - [x] 新增脚本或构建步骤，将 `release/win-unpacked/` 压缩为绿色版 zip；压缩前确认没有 `data/`。
 - [x] 保持现有本地 `npm run build` 语义清晰；本地构建不应自动签名或上传 Release。
+- [x] 安装版使用自定义 NSIS 安装位置页，选择目录后实时显示并强制最终目录名为 `lotus-canvas`。
 
 **阶段验收：** 在干净的 `web/dist` 前提下，本地能生成 NSIS 安装包、绿色版 zip，并确认两个产物都能启动 `app://canvas`。
 
@@ -133,6 +134,8 @@
 - [x] 关闭静默下载和强制安装，提供检查中、发现新版本、下载进度、安装提示和失败提示等状态。
 - [x] 启动时检测一次；网络失败只更新状态，不影响主应用使用。
 - [x] 下载完成后由用户确认立即重启安装，绿色版不显示应用内更新入口。
+- [x] 统一绿色版与安装版 userData 结构：绿色版为 exe 同级 `data/`，安装版为 `%APPDATA%\lotus-canvas\data/`。
+- [x] 安装版默认媒体库为 userData 下的 `library/`；配置页提供迁移入口并将自定义位置规范化为 `lotus-canvas/data/library`，绿色版不显示修改入口。
 - [ ] 新版本安装后验证 exe 同级 `data/` 仍存在，IndexedDB 和媒体库数据可继续读取。
 - [x] 区分构建发布与客户端更新状态，分别在 CI 和应用界面验收。
 
@@ -151,7 +154,7 @@
 - [ ] CI 在 Windows Runner 上从干净检出完成构建，不依赖已存在的 `web/dist`。
 - [ ] NSIS 安装包可以在干净 Windows 环境安装、启动和卸载。
 - [ ] 绿色版 zip 解压后可以直接启动，目录可移动到另一个位置。
-- [ ] 安装版升级不会删除或重置 `%APPDATA%\lotus-canvas` 及用户选择的媒体库。
+- [ ] 安装版升级不会删除或重置 `%APPDATA%\lotus-canvas\data` 及用户选择的媒体库。
 - [x] 绿色版替换程序文件不会删除或重置 exe 同级 `data/`。
 - [ ] 正式 Release 资产均有 SHA-256 校验值；签名状态符合发布要求。
 - [ ] SmartScreen、安装包启动、外链系统浏览器打开、媒体文件库和 AI 请求中继完成一次人工回归。
@@ -169,5 +172,5 @@
 
 ## 与既有文档的关系
 
-- 本计划补充并覆盖 `desktop/docs/specs/2026-07-31-electron-shell-design.md` 中“未签名、不做自动更新”的原始非目标；原有 CORS、`app://canvas`、用户数据目录和绿色版设计仍继续有效。
+- 本计划补充并覆盖 `desktop/docs/specs/2026-07-31-electron-shell-design.md` 中“未签名、不做自动更新”的原始非目标，并细化安装版 userData 路径；原有 CORS、`app://canvas` 和绿色版设计仍继续有效。
 - 当前待办入口为 `docs/content/docs/progress/todo.zh-CN.mdx` 与 `docs/content/docs/progress/todo.mdx`；实现某一阶段后，应将对应待办移入 `pending-test`，人工验证通过后再更新正式功能文档。

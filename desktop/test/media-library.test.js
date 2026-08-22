@@ -6,7 +6,7 @@ const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
 
-const { MediaLibrary, resolveEntryPath, validateStorageKey } = require("../src/media-library");
+const { MediaLibrary, migrateMediaLibrary, normalizeMediaLibraryDir, resolveEntryPath, validateStorageKey } = require("../src/media-library");
 const { parseRange } = require("../src/media-protocol");
 
 async function withLibrary(run) {
@@ -76,4 +76,45 @@ test("Range 解析支持完整、开放与后缀范围", () => {
     assert.deepStrictEqual(parseRange("bytes=6-", 10), { start: 6, end: 9 });
     assert.deepStrictEqual(parseRange("bytes=-3", 10), { start: 7, end: 9 });
     assert.strictEqual(parseRange("bytes=20-30", 10), false);
+});
+
+test("媒体库自定义目录规范化为 lotus-canvas/data/library", () => {
+    assert.strictEqual(normalizeMediaLibraryDir(path.join("D:", "Media")), path.join("D:", "Media", "lotus-canvas", "data", "library"));
+    assert.strictEqual(normalizeMediaLibraryDir(path.join("D:", "Media", "lotus-canvas")), path.join("D:", "Media", "lotus-canvas", "data", "library"));
+    assert.strictEqual(normalizeMediaLibraryDir(path.join("D:", "Media", "lotus-canvas", "data")), path.join("D:", "Media", "lotus-canvas", "data", "library"));
+    assert.strictEqual(normalizeMediaLibraryDir(path.join("D:", "Media", "lotus-canvas", "data", "library")), path.join("D:", "Media", "lotus-canvas", "data", "library"));
+});
+
+test("媒体库迁移完成校验后删除旧目录", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "lotus-migrate-"));
+    const source = path.join(root, "old", "library");
+    const target = path.join(root, "new", "lotus-canvas", "data", "library");
+    try {
+        const sourceLibrary = new MediaLibrary(source);
+        await sourceLibrary.put("image:item", Buffer.from("media"), { mimeType: "image/png" });
+        const result = await migrateMediaLibrary(source, target);
+        assert.strictEqual(result.migrated, true);
+        assert.strictEqual(await fs.stat(target).then(() => true), true);
+        await assert.rejects(() => fs.stat(source));
+        const targetLibrary = new MediaLibrary(target);
+        assert.ok(await targetLibrary.get("image:item"));
+    } finally {
+        await fs.rm(root, { recursive: true, force: true });
+    }
+});
+
+test("媒体库迁移目标非空时保留旧目录并拒绝覆盖", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "lotus-migrate-"));
+    const source = path.join(root, "old");
+    const target = path.join(root, "new");
+    try {
+        await fs.mkdir(source, { recursive: true });
+        await fs.writeFile(path.join(source, "media.bin"), "media");
+        await fs.mkdir(target, { recursive: true });
+        await fs.writeFile(path.join(target, "keep.txt"), "keep");
+        await assert.rejects(() => migrateMediaLibrary(source, target), (error) => error.code === "MEDIA_LIBRARY_TARGET_NOT_EMPTY");
+        assert.strictEqual(await fs.readFile(path.join(source, "media.bin"), "utf8"), "media");
+    } finally {
+        await fs.rm(root, { recursive: true, force: true });
+    }
 });

@@ -26,7 +26,7 @@ nsis:
   artifactName: '${productName}-${version}-win-${arch}.${ext}'
   oneClick: false
   perMachine: false
-  allowToChangeInstallationDirectory: true
+  allowToChangeInstallationDirectory: false
   createDesktopShortcut: true
   createStartMenuShortcut: true
   deleteAppDataOnUninstall: false

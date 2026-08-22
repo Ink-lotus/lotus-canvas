@@ -36,9 +36,9 @@ test("绿色版用户数据位于 exe 同级 data", () => {
     assert.strictEqual(result, path.join("E:", "green", "data"));
 });
 
-test("安装版用户数据位于 APPDATA/lotus-canvas", () => {
+test("安装版用户数据位于 APPDATA/lotus-canvas/data", () => {
     const result = resolveUserDataDir({ isPackaged: true, portable: false, exePath: path.join("C:", "Program Files", "lotus-canvas", "lotus-canvas.exe"), appDataPath: path.join("C:", "Users", "tester", "AppData", "Roaming") });
-    assert.strictEqual(result, path.join("C:", "Users", "tester", "AppData", "Roaming", "lotus-canvas"));
+    assert.strictEqual(result, path.join("C:", "Users", "tester", "AppData", "Roaming", "lotus-canvas", "data"));
 });
 
 test("未打包态用户数据位于 desktop/data", () => {

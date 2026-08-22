@@ -14,6 +14,108 @@ const DEFAULT_MEDIA_ORIGIN = "external";
 const STORAGE_KEY_PATTERN = /^[a-z][a-z0-9-]{0,31}:[A-Za-z0-9_-]{1,96}$/;
 const MEDIA_ORIGINS = new Set(["external", "generated"]);
 
+/** 将用户选择的目录规范化为 <选择目录>/lotus-canvas/data/library。 */
+function normalizeMediaLibraryDir(selectedPath) {
+    const resolved = path.resolve(String(selectedPath || ""));
+    const parts = resolved.split(path.sep).filter(Boolean);
+    const lower = parts.map((part) => part.toLowerCase());
+    const libraryIndex = lower.length - 1;
+    if (lower[libraryIndex] === "library" && lower[libraryIndex - 1] === "data" && lower[libraryIndex - 2] === "lotus-canvas") return resolved;
+    if (lower[libraryIndex] === "data" && lower[libraryIndex - 1] === "lotus-canvas") return path.join(resolved, "library");
+    if (lower[libraryIndex] === "lotus-canvas") return path.join(resolved, "data", "library");
+    return path.join(resolved, "lotus-canvas", "data", "library");
+}
+
+/**
+ * 复制并校验媒体库。目标必须为空或不存在，源目录成功复制后才删除，避免失败时破坏原数据。
+ */
+async function migrateMediaLibrary(sourceDir, targetDir, { removeSource = true } = {}) {
+    const source = path.resolve(sourceDir);
+    const target = path.resolve(targetDir);
+    if (source === target) return { source, target, migrated: false };
+    const relativeTarget = path.relative(source, target);
+    if (relativeTarget && !relativeTarget.startsWith("..") && !path.isAbsolute(relativeTarget)) throw mediaError("INVALID_MIGRATION_TARGET", "媒体库目标不能位于当前媒体库内");
+
+    let sourceExists = true;
+    try {
+        await fsp.stat(source);
+    } catch (error) {
+        if (error.code !== "ENOENT") throw error;
+        sourceExists = false;
+    }
+    await assertEmptyOrMissingDirectory(target);
+    await fsp.rm(target, { recursive: true, force: true });
+    await fsp.mkdir(path.dirname(target), { recursive: true });
+    const temp = path.join(path.dirname(target), `.${path.basename(target)}.migration-${crypto.randomUUID()}`);
+    try {
+        if (sourceExists) await copyMediaDirectory(source, temp);
+        else await fsp.mkdir(temp, { recursive: true });
+        await verifyMediaDirectory(sourceExists ? source : null, temp);
+        await fsp.rename(temp, target);
+        if (removeSource && sourceExists) await fsp.rm(source, { recursive: true, force: true });
+        return { source, target, migrated: sourceExists };
+    } catch (error) {
+        await fsp.rm(temp, { recursive: true, force: true }).catch(() => undefined);
+        throw error;
+    }
+}
+
+async function assertEmptyOrMissingDirectory(directory) {
+    try {
+        const entries = await fsp.readdir(directory);
+        if (entries.length) throw mediaError("MEDIA_LIBRARY_TARGET_NOT_EMPTY", "媒体库目标目录不为空，已拒绝覆盖");
+    } catch (error) {
+        if (error.code !== "ENOENT") throw error;
+    }
+}
+
+async function copyMediaDirectory(source, target) {
+    await fsp.cp(source, target, {
+        recursive: true,
+        force: false,
+        errorOnExist: true,
+        filter: (value) => path.basename(value) !== ".tmp",
+    });
+}
+
+async function verifyMediaDirectory(source, target) {
+    const sourceFiles = source ? await listMediaFiles(source) : [];
+    const targetFiles = await listMediaFiles(target);
+    if (sourceFiles.length !== targetFiles.length) throw mediaError("MEDIA_LIBRARY_VERIFY_FAILED", "媒体库迁移校验失败");
+    const targetByPath = new Map(targetFiles.map((item) => [item.relative, item]));
+    for (const file of sourceFiles) {
+        const copied = targetByPath.get(file.relative);
+        if (!copied || copied.bytes !== file.bytes || copied.sha256 !== file.sha256) throw mediaError("MEDIA_LIBRARY_VERIFY_FAILED", "媒体库迁移校验失败");
+    }
+}
+
+async function listMediaFiles(rootDir) {
+    const files = [];
+    async function visit(current) {
+        for (const entry of await fsp.readdir(current, { withFileTypes: true })) {
+            if (entry.name === ".tmp") continue;
+            const absolute = path.join(current, entry.name);
+            if (entry.isDirectory()) await visit(absolute);
+            else if (entry.isFile()) {
+                const digest = await hashFile(absolute);
+                files.push({ relative: path.relative(rootDir, absolute), ...digest });
+            }
+        }
+    }
+    await visit(rootDir);
+    return files;
+}
+
+async function hashFile(filePath) {
+    const digest = crypto.createHash("sha256");
+    let bytes = 0;
+    for await (const chunk of fs.createReadStream(filePath)) {
+        bytes += chunk.length;
+        digest.update(chunk);
+    }
+    return { bytes, sha256: digest.digest("hex") };
+}
+
 class MediaLibrary {
     constructor(rootDir) {
         this.rootDir = path.resolve(rootDir);
@@ -305,6 +407,8 @@ module.exports = {
     MANIFEST_FILE,
     MANIFEST_VERSION,
     MediaLibrary,
+    migrateMediaLibrary,
+    normalizeMediaLibraryDir,
     normalizeMediaOrigin,
     mediaExtension,
     mediaKind,

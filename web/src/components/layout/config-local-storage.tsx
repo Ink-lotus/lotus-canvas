@@ -1,10 +1,10 @@
-import { Alert, App, Button, Progress, Spin } from "antd";
+import { Alert, App, Button, Progress, Spin, Tooltip } from "antd";
 import type { TFunction } from "i18next";
-import { Database, FolderOpen, HardDrive, Layers3, RefreshCw } from "lucide-react";
+import { Database, FolderOpen, HardDrive, Layers3, RefreshCw, Settings2 } from "lucide-react";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
-import { isDesktopMediaLibrary, openDesktopMediaLibrary, readDesktopMediaStats, type DesktopMediaStats } from "@/services/desktop-media-storage";
+import { isDesktopMediaLibrary, openDesktopMediaLibrary, readDesktopAppInfo, readDesktopMediaStats, selectDesktopMediaLibrary, type DesktopAppInfo, type DesktopMediaStats } from "@/services/desktop-media-storage";
 import { readLocalStorageUsage, type LocalStorageUsage } from "@/services/local-storage-usage";
 
 const storeLabelKeys: Record<string, string> = {
@@ -24,6 +24,9 @@ export function ConfigLocalStorage({ active }: { active: boolean }) {
     const [desktopStats, setDesktopStats] = useState<DesktopMediaStats | null>(null);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState("");
+    const [appInfo, setAppInfo] = useState<DesktopAppInfo | null>(null);
+    const [changingLibrary, setChangingLibrary] = useState(false);
+    const [libraryError, setLibraryError] = useState("");
     const desktop = isDesktopMediaLibrary();
 
     const refresh = useCallback(async () => {
@@ -47,6 +50,11 @@ export function ConfigLocalStorage({ active }: { active: boolean }) {
         if (active && !usage) void refresh();
     }, [active, refresh, usage]);
 
+    useEffect(() => {
+        if (!active || !desktop) return;
+        void readDesktopAppInfo().then(setAppInfo).catch(() => setAppInfo(null));
+    }, [active, desktop]);
+
     const indexedDbBytes = usage?.contentBytes ?? 0;
     const percent = usage ? Math.min(100, (usage.usage / usage.quota) * 100) : 0;
 
@@ -58,17 +66,51 @@ export function ConfigLocalStorage({ active }: { active: boolean }) {
         }
     };
 
+    const changeLibrary = async () => {
+        setChangingLibrary(true);
+        setLibraryError("");
+        try {
+            const nextPath = await selectDesktopMediaLibrary();
+            if (!nextPath) return;
+            await refresh();
+            message.success(t("config.localStorage.library.changed"));
+        } catch (reason) {
+            const detail = reason instanceof Error ? reason.message : t("config.localStorage.library.changeFailed");
+            setLibraryError(detail);
+            message.error(t("config.localStorage.library.changeFailed"));
+        } finally {
+            setChangingLibrary(false);
+        }
+    };
+
     return (
         <div className="space-y-3">
             {desktop && desktopStats ? (
                 <section className="rounded-lg border border-stone-200 p-4 dark:border-stone-800">
                     <div className="flex flex-wrap items-start justify-between gap-3">
                         <div className="min-w-0">
-                            <div className="flex items-center gap-2 text-sm font-semibold"><HardDrive className="size-4" />{t("config.localStorage.library.title")}</div>
+                            <div className="flex items-center gap-2 text-sm font-semibold">
+                                <HardDrive className="size-4" />
+                                <span>{t("config.localStorage.library.title")}</span>
+                                {appInfo?.isDesktop && !appInfo.portable ? (
+                                    <Tooltip title={t("config.localStorage.library.change")}>
+                                        <Button
+                                            type="text"
+                                            size="small"
+                                            icon={<Settings2 className="size-4" />}
+                                            loading={changingLibrary}
+                                            aria-label={t("config.localStorage.library.change")}
+                                            onClick={() => void changeLibrary()}
+                                        />
+                                    </Tooltip>
+                                ) : null}
+                            </div>
                             <div className="mt-1 break-all font-mono text-[11px] text-stone-500">{desktopStats.rootPath}</div>
                         </div>
                         <Button icon={<FolderOpen className="size-4" />} onClick={() => void openLibrary()}>{t("config.localStorage.library.open")}</Button>
                     </div>
+                    {libraryError ? <Alert className="mt-3" type="error" showIcon message={t("config.localStorage.library.changeFailed")} description={libraryError} /> : null}
+                    {changingLibrary ? <div className="mt-3 flex items-center gap-2 text-xs text-stone-500"><Spin size="small" />{t("config.localStorage.library.changing")}</div> : null}
                     <div className="mt-4 grid gap-3 sm:grid-cols-2">
                         <StorageMetric icon={<HardDrive className="size-4" />} label={t("config.localStorage.library.usage")} value={formatStorageBytes(desktopStats.bytes)} hint={t("config.localStorage.library.files", { count: desktopStats.files })} />
                         <StorageMetric icon={<Layers3 className="size-4" />} label={t("config.localStorage.library.references")} value={String(desktopStats.records)} hint={t("config.localStorage.library.dedupHint")} />

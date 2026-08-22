@@ -392,7 +392,7 @@ export default {
             records: "{{count}} 条",
             refresh: "刷新统计",
             readFailed: "读取本地存储失败",
-            library: { title: "桌面媒体文件库", open: "打开文件夹", usage: "文件库占用", files: "{{count}} 个物理文件", references: "媒体引用", dedupHint: "相同内容共用文件" },
+            library: { title: "桌面媒体文件库", open: "打开文件夹", change: "修改媒体文件库位置", changing: "正在迁移媒体文件库，请稍候", changed: "媒体文件库已更新", changeFailed: "修改媒体文件库失败", usage: "文件库占用", files: "{{count}} 个物理文件", references: "媒体引用", dedupHint: "相同内容共用文件" },
             stores: { appState: "应用状态", images: "图片文件", media: "音视频文件", imageLogs: "生图记录", videoLogs: "视频记录", agentMessages: "Agent 消息", promptCache: "提示词缓存" },
         },
         promptSources: {

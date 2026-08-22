@@ -1,7 +1,6 @@
 "use strict";
 
 const { pathToFileURL } = require("node:url");
-const fs = require("node:fs");
 const fsp = require("node:fs/promises");
 const path = require("node:path");
 const { app, BrowserWindow, Menu, net, protocol, session, shell, dialog, ipcMain } = require("electron");
@@ -9,7 +8,7 @@ const { app, BrowserWindow, Menu, net, protocol, session, shell, dialog, ipcMain
 const { buildCorsResponse, corsHeaderEntries, shouldInterceptUrl } = require("./src/cors");
 const { isExternalUrl } = require("./src/external-navigation");
 const { resolveAppAssetPath } = require("./src/app-protocol");
-const { MediaLibrary } = require("./src/media-library");
+const { MediaLibrary, migrateMediaLibrary, normalizeMediaLibraryDir } = require("./src/media-library");
 const { createMediaProtocolHandler } = require("./src/media-protocol");
 const { relayDecision, relayRequest } = require("./src/relay");
 const { isPortableRuntime, resolveDistDir, resolveLibraryDir, resolveUserDataDir } = require("./src/paths");
@@ -74,12 +73,7 @@ async function saveMediaLibraryPath(rootPath) {
 }
 
 async function initializeMediaLibrary() {
-    let rootPath = await readMediaLibraryPath();
-    if (app.isPackaged && !PORTABLE && !fs.existsSync(path.join(app.getPath("userData"), MEDIA_LIBRARY_CONFIG))) {
-        const result = await dialog.showOpenDialog({ properties: ["openDirectory", "createDirectory"] });
-        if (!result.canceled && result.filePaths[0]) rootPath = path.resolve(result.filePaths[0]);
-        await saveMediaLibraryPath(rootPath);
-    }
+    const rootPath = await readMediaLibraryPath();
     mediaLibrary = new MediaLibrary(rootPath);
     handleMediaRequest = createMediaProtocolHandler({ library: mediaLibrary, shell });
 }
@@ -105,18 +99,28 @@ function registerDesktopIpc() {
     ipcMain.handle("desktop:get-app-info", () => ({ isDesktop: true, portable: PORTABLE, version: app.getVersion(), updateSupported: Boolean(autoUpdater && app.isPackaged && !PORTABLE) }));
     ipcMain.handle("desktop:get-media-library-path", () => mediaLibrary.rootDir);
     ipcMain.handle("desktop:select-media-library", async () => {
-        if (PORTABLE) return mediaLibrary.rootDir;
+        if (PORTABLE) return null;
         const result = await dialog.showOpenDialog({ properties: ["openDirectory", "createDirectory"] });
         if (result.canceled || !result.filePaths[0]) return null;
-        const rootPath = path.resolve(result.filePaths[0]);
+        const rootPath = normalizeMediaLibraryDir(result.filePaths[0]);
+        const previousRoot = mediaLibrary.rootDir;
+        if (path.resolve(previousRoot) === path.resolve(rootPath)) return rootPath;
+        await mediaLibrary.writeQueue;
+        await migrateMediaLibrary(previousRoot, rootPath, { removeSource: false });
+        try {
+            await saveMediaLibraryPath(rootPath);
+        } catch (error) {
+            await fsp.rm(rootPath, { recursive: true, force: true }).catch(() => undefined);
+            throw error;
+        }
+        await fsp.rm(previousRoot, { recursive: true, force: true }).catch(() => undefined);
         mediaLibrary = new MediaLibrary(rootPath);
         handleMediaRequest = createMediaProtocolHandler({ library: mediaLibrary, shell });
-        await saveMediaLibraryPath(rootPath);
         return rootPath;
     });
     ipcMain.handle("desktop:check-for-updates", async (_event, releaseTag) => {
         if (!autoUpdater || PORTABLE || !app.isPackaged) return null;
-        if (typeof releaseTag === "string" && /^desktop-v\\d+\\.\\d+\\.\\d+$/.test(releaseTag)) {
+        if (typeof releaseTag === "string" && /^desktop-v\d+\.\d+\.\d+$/.test(releaseTag)) {
             autoUpdater.setFeedURL({ provider: "generic", url: `${DESKTOP_RELEASE_REPOSITORY}/${releaseTag}/` });
         }
         const result = await autoUpdater.checkForUpdates();

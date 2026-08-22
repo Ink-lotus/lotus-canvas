@@ -392,7 +392,7 @@ export default {
             records: "{{count}} records",
             refresh: "Refresh usage",
             readFailed: "Failed to read local storage",
-            library: { title: "Desktop media library", open: "Open folder", usage: "Library usage", files: "{{count}} physical files", references: "Media references", dedupHint: "Identical content shares one file" },
+            library: { title: "Desktop media library", open: "Open folder", change: "Change media library location", changing: "Migrating the media library…", changed: "Media library updated", changeFailed: "Failed to change media library", usage: "Library usage", files: "{{count}} physical files", references: "Media references", dedupHint: "Identical content shares one file" },
             stores: { appState: "App state", images: "Image files", media: "Audio and video files", imageLogs: "Image history", videoLogs: "Video history", agentMessages: "Agent messages", promptCache: "Prompt cache" },
         },
         promptSources: {
