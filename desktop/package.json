@@ -1,6 +1,6 @@
 {
     "name": "lotus-canvas-desktop",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "private": true,
     "productName": "lotus-canvas",
     "description": "lotus-canvas Windows desktop app",
