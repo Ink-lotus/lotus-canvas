@@ -50,7 +50,7 @@ let mediaLibrary;
 let handleMediaRequest;
 let mainWindow;
 let updateState = { status: "idle" };
-const DESKTOP_RELEASE_REPOSITORY = "https://github.com/Ink-lotus/infinite-canvas/releases/download";
+const DESKTOP_RELEASE_REPOSITORY = "https://github.com/Ink-lotus/lotus-canvas/releases/download";
 
 const MEDIA_LIBRARY_CONFIG = "media-library.json";
 

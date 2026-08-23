@@ -6,7 +6,7 @@ import { parseChangelog, type ReleaseInfo } from "@/lib/release";
 
 const latestVersionUrl = "https://raw.githubusercontent.com/basketikun/infinite-canvas/main/VERSION";
 const latestChangelogUrl = "https://raw.githubusercontent.com/basketikun/infinite-canvas/main/CHANGELOG.md";
-const desktopReleasesUrl = "https://api.github.com/repos/Ink-lotus/infinite-canvas/releases?per_page=30";
+const desktopReleasesUrl = "https://api.github.com/repos/Ink-lotus/lotus-canvas/releases?per_page=30";
 
 function readLocalReleases(): ReleaseInfo[] {
     return __APP_RELEASES__ || [];

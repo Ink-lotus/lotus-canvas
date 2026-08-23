@@ -35,4 +35,4 @@ nsis:
 publish:
   provider: github
   owner: Ink-lotus
-  repo: infinite-canvas
+  repo: lotus-canvas
