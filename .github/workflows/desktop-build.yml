@@ -97,6 +97,14 @@ jobs:
           node --max-old-space-size=8192 node_modules/vite/bin/vite.js build > build.log 2>&1
           if errorlevel 1 (type build.log & exit /b 1)
 
+      - name: Upload web build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lotus-canvas-web-build-log-${{ github.run_id }}
+          path: web/build.log
+          if-no-files-found: warn
+
       - name: Install desktop dependencies
         working-directory: desktop
         run: npm.cmd ci
