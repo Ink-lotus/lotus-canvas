@@ -105,6 +105,19 @@ jobs:
           path: web/build.log
           if-no-files-found: warn
 
+      - name: Add web build log to run summary
+        if: failure()
+        shell: pwsh
+        run: |
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "## Web build failure log"
+          if (Test-Path 'web/build.log') {
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value '```text'
+            Get-Content 'web/build.log' | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value '```'
+          } else {
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value 'build.log was not generated.'
+          }
+
       - name: Install desktop dependencies
         working-directory: desktop
         run: npm.cmd ci
