@@ -90,9 +90,12 @@ jobs:
 
       - name: Build web assets
         working-directory: web
+        shell: cmd
         env:
           LOTUS_DESKTOP_BUILD: '1'
-        run: .\node_modules\.bin\vite.cmd build
+        run: |
+          node --max-old-space-size=8192 node_modules/vite/bin/vite.js build > build.log 2>&1
+          if errorlevel 1 (type build.log & exit /b 1)
 
       - name: Install desktop dependencies
         working-directory: desktop
