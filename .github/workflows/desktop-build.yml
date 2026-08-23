@@ -77,46 +77,11 @@ jobs:
         working-directory: web
         run: npm.cmd ci --legacy-peer-deps
 
-      - name: Verify web build tool
-        working-directory: web
-        shell: pwsh
-        run: |
-          node --version
-          npm --version
-          if (-not (Test-Path 'node_modules/.bin/vite.cmd')) {
-            throw 'Vite executable was not installed.'
-          }
-          npm.cmd exec -- vite --version
-
       - name: Build web assets
         working-directory: web
-        shell: cmd
         env:
           LOTUS_DESKTOP_BUILD: '1'
-        run: |
-          node --max-old-space-size=8192 node_modules/vite/bin/vite.js build > build.log 2>&1
-          if errorlevel 1 (type build.log & exit /b 1)
-
-      - name: Upload web build log on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: lotus-canvas-web-build-log-${{ github.run_id }}
-          path: web/build.log
-          if-no-files-found: warn
-
-      - name: Add web build log to run summary
-        if: failure()
-        shell: pwsh
-        run: |
-          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "## Web build failure log"
-          if (Test-Path 'web/build.log') {
-            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value '```text'
-            Get-Content 'web/build.log' | Add-Content -Path $env:GITHUB_STEP_SUMMARY
-            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value '```'
-          } else {
-            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value 'build.log was not generated.'
-          }
+        run: npm.cmd run build
 
       - name: Install desktop dependencies
         working-directory: desktop
@@ -162,6 +127,7 @@ jobs:
       RELEASE_TAG: ${{ github.ref_name }}
       DESKTOP_REPLACE_EXISTING: ${{ inputs.replace_existing == true && inputs.publish == true }}
       REPOSITORY: ${{ github.repository }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Download release artifacts
         uses: actions/download-artifact@v4
