@@ -19,6 +19,14 @@ const imageLogStore = localforage.createInstance({ name: "infinite-canvas", stor
 const videoLogStore = localforage.createInstance({ name: "infinite-canvas", storeName: "video_generation_logs" });
 const objectUrls = new Map<string, string>();
 
+// A reference image or a stored file could not be read locally, so retrying the same request on another channel cannot help.
+export class ImageReadError extends Error {
+    constructor() {
+        super(i18n.t("common.imageReadFailed"));
+        this.name = "ImageReadError";
+    }
+}
+
 export async function uploadImage(input: string | Blob, options?: { suggestedName?: string; origin?: MediaOrigin }): Promise<UploadedImage> {
     const blob = typeof input === "string" ? await (await fetch(input)).blob() : input;
     const storageKey = `image:${nanoid()}`;
@@ -67,7 +75,9 @@ export async function setImageBlob(storageKey: string, blob: Blob, origin: Media
 export async function imageToDataUrl(image: { url?: string; dataUrl?: string; storageKey?: string }) {
     const url = image.dataUrl || (await resolveImageUrl(image.storageKey, image.url || ""));
     if (!url || url.startsWith("data:")) return url;
-    return blobToDataUrl(await (await fetch(url)).blob());
+    const response = await fetch(url);
+    if (!response.ok) throw new ImageReadError();
+    return blobToDataUrl(await response.blob());
 }
 
 export async function deleteStoredImages(keys: Iterable<string>) {
@@ -116,7 +126,7 @@ function blobToDataUrl(blob: Blob) {
     return new Promise<string>((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = () => resolve(String(reader.result || ""));
-        reader.onerror = () => reject(new Error(i18n.t("common.imageReadFailed")));
+        reader.onerror = () => reject(new ImageReadError());
         reader.readAsDataURL(blob);
     });
 }

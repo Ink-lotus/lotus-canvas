@@ -1,3 +1,4 @@
+import { ImageReadError } from "@/services/image-storage";
 import { decodeChannelModel, normalizeChannelConcurrency, normalizeImageModelTargets, type AiConfig } from "@/stores/use-config-store";
 
 type ScheduledImageResult<T> = { value: T; target: string };
@@ -133,7 +134,8 @@ export async function scheduleImageGeneration<T>(config: AiConfig, targets: stri
             return await scheduler.schedule(config, remainingTargets, run, { signal: options.signal, preferredTarget });
         } catch (error) {
             if (!(error instanceof ImageGenerationAttemptError)) throw error;
-            if (!options.fallbackOnError || isAbortError(error.cause)) throw error.cause;
+            // A local read failure repeats on every channel, so surface it instead of turning it into one real request per channel.
+            if (!options.fallbackOnError || isAbortError(error.cause) || error.cause instanceof ImageReadError) throw error.cause;
             remainingTargets = remainingTargets.filter((target) => target !== error.target);
             preferredTarget = undefined;
             if (!remainingTargets.length) throw error.cause;
