@@ -5,6 +5,7 @@ description: 当前版本已实现但仍需人工验证的变更项
 
 # 待测试
 
+- Canvas Agent 生成流程引用：提示词仅包含已经通过 `referenceNodeIds` 传入的 `@[node:...]` 引用时，应直接把现有文本、图片、视频、音频或组节点连接到生成配置节点，不再创建重复的提示词文本节点；提示词包含普通文字时仍应创建独立的提示词文本节点。
 - 视频画面截取：右键有内容的视频节点应显示「截取首帧」「截取尾帧」「截取当前帧」；三项操作应按视频原始比例在右侧生成并选中图片节点，同时建立视频到图片的连线；「截取当前帧」应使用播放器此刻停留的画面，截取过程不得改变原视频的播放位置。
 - 文本节点：节点正文右上角不再显示「生图」按钮，文字内容应使用完整正文区域；节点上方工具条中的生图入口仍可正常创建生成配置。
 - 多文本生成：生成次数大于 1 时只创建一个文本结果节点和一条来源连线；节点右上角显示实际生成成功的文本数量，点击后应像多图节点一样展开所有备选文本；点击「设为主文本」应立即替换正文，原主文本保留为备选，双击正文编辑后再次切换回来仍应保留修改。
@@ -35,6 +36,7 @@ description: 当前版本已实现但仍需人工验证的变更项
 - Canvas Agent Codex 升级：启动 Canvas Agent 后应输出 Canvas Agent、内置 Codex 和本机 Codex 版本，实际运行的内置 Codex 应为 0.146.0；内置与本机版本不一致、未安装本机 Codex，或 npm 存在更新版本时应显示对应升级提醒，npm 检查失败不应阻止服务启动；Agent 应能正常连接 Codex、创建或恢复会话、发送消息并调用画布工具，运行中停止任务应只中断当前 turn，随后无需重启 Agent 即可继续发送新任务。
 - Canvas Agent Debug：普通启动应通过公共 logger 输出 Info、Warn 和 Error 日志；使用 `npx -y @basketikun/canvas-agent --debug` 启动后还应输出 Debug 日志并显示日志文件路径，终端统一采用“`YYYY-MM-DD HH:mm:ss` 级别 消息 详情”的纯文本单行格式，`~/.infinite-canvas/logs/` 下应按启动日期生成相同格式的 `canvas-agent-YYYY-MM-DD.log`，同一天多次启动应追加到同一文件；日志中不应出现连接 token 或图片 Data URL 原文。
 - Canvas Agent 凭据脱敏：Codex 与 Claude CLI 的 stderr 包含 Bearer token、`sk-` 密钥、显式 API key/token/authorization 赋值、ANSI 样式或跨输出分片的凭据时，调试日志和网页诊断事件均不应出现明文；普通 stderr 文本应保持不变。
+- Canvas Agent 配置权限：在 Linux 和 macOS 上保存配置后，`~/.infinite-canvas` 权限应为 `0700`，`canvas-agent.json` 权限应为 `0600`，已有的宽松权限也应被纠正；配置应能继续正常读写，Windows 启动不受影响。
 - 图片 API 模型参数：`gpt-image-*` 的生成和编辑请求不应发送 `response_format`，`dall-e-*` 请求仍应发送 `response_format: "b64_json"`。
 - 图片外链持久化：图片接口返回远程 URL 时，前端应立即下载为自包含图片数据并进入原有本地存储流程；浏览器因 CORS 无法下载时仍应保留原 URL 兜底。
 - Canvas Agent Codex 日志：Codex app-server 输出带颜色或样式控制符及 UTC 时间的 stderr 时，本地日志和网页诊断日志应只显示一份 `YYYY-MM-DD HH:mm:ss` 本地时间和干净文本，不应出现重复 ISO 时间或 `[2m`、`[31m` 等 ANSI 转义内容。
