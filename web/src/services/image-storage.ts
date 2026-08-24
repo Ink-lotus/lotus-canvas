@@ -43,7 +43,9 @@ export async function resolveImageUrl(storageKey?: string, fallback = "") {
     if (!storageKey) return fallback;
     const cached = objectUrls.get(storageKey);
     if (cached) return cached;
-    if (isDesktopMediaLibrary() && (await hasDesktopMedia(storageKey))) {
+    // A probe failure means the media is unusable locally, so treat it as absent instead of letting a generic error escape:
+    // the desktop route answers 500 (not 404) when the index still has the record but the file is gone from disk.
+    if (isDesktopMediaLibrary() && (await hasDesktopMedia(storageKey).catch(() => false))) {
         const url = desktopMediaUrl(storageKey);
         objectUrls.set(storageKey, url);
         return url;
@@ -74,8 +76,13 @@ export async function setImageBlob(storageKey: string, blob: Blob, origin: Media
 
 export async function imageToDataUrl(image: { url?: string; dataUrl?: string; storageKey?: string }) {
     const url = image.dataUrl || (await resolveImageUrl(image.storageKey, image.url || ""));
-    if (!url || url.startsWith("data:")) return url;
-    const response = await fetch(url);
+    if (url.startsWith("data:")) return url;
+    // Every failure here has to be an ImageReadError, or the scheduler treats it as a channel fault and repeats the
+    // same broken read on every remaining channel. An unresolvable source used to return "" and send an empty reference.
+    if (!url) throw new ImageReadError();
+    const response = await fetch(url).catch(() => {
+        throw new ImageReadError();
+    });
     if (!response.ok) throw new ImageReadError();
     return blobToDataUrl(await response.blob());
 }
