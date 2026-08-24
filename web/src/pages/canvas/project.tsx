@@ -9,7 +9,7 @@ import { requestEdit, requestGeneration, requestImageQuestion } from "@/services
 import { scheduleImageGeneration } from "@/services/api/image-generation-scheduler";
 import { requestAudioGeneration, storeGeneratedAudio } from "@/services/api/audio";
 import { requestVideoGeneration, storeGeneratedVideo } from "@/services/api/video";
-import { defaultConfig, useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
+import { defaultConfig, normalizeImageModelTargets, useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
 import { uploadImage } from "@/services/image-storage";
 import { uploadMediaFile } from "@/services/file-storage";
 import { nanoid } from "nanoid";
@@ -183,7 +183,19 @@ function InfiniteCanvasPage() {
 
     const config = useConfigStore((state) => state.config);
     const effectiveConfig = useEffectiveConfig();
-    const selectedImageModel = effectiveConfig.imageModelTargets[0] || effectiveConfig.imageModel || effectiveConfig.model;
+    // New nodes reuse the image channels last picked in this canvas; a reload or a new default model falls back to the global selection.
+    const lastImageTargetsRef = useRef<string[]>([]);
+    useEffect(() => {
+        lastImageTargetsRef.current = [];
+    }, [effectiveConfig.imageModel]);
+    const nextImageModelTargets = useCallback(() => {
+        const remembered = normalizeImageModelTargets(lastImageTargetsRef.current[0] || "", lastImageTargetsRef.current, effectiveConfig.channels);
+        return remembered.length ? remembered : normalizeImageModelTargets(effectiveConfig.imageModel, effectiveConfig.imageModelTargets, effectiveConfig.channels);
+    }, [effectiveConfig.channels, effectiveConfig.imageModel, effectiveConfig.imageModelTargets]);
+    const nextImageConfigMetadata = useCallback(() => {
+        const imageModelTargets = nextImageModelTargets();
+        return { model: imageModelTargets[0] || effectiveConfig.imageModel || effectiveConfig.model, imageModelTargets };
+    }, [effectiveConfig.imageModel, effectiveConfig.model, nextImageModelTargets]);
     const isAiConfigReady = useConfigStore((state) => state.isAiConfigReady);
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const addAsset = useAssetStore((state) => state.addAsset);
@@ -506,7 +518,12 @@ function InfiniteCanvasPage() {
 
     const createConnectedNode = useCallback(
         (type: CanvasNodeType.Image | CanvasNodeType.Text | CanvasNodeType.Config | CanvasNodeType.Video | CanvasNodeType.Audio, pending: PendingConnectionCreate) => {
-            const metadata = type === CanvasNodeType.Config ? { model: selectedImageModel, imageModelTargets: effectiveConfig.imageModelTargets, size: effectiveConfig.size, count: getGenerationCount(effectiveConfig.canvasImageCount || effectiveConfig.count) } : undefined;
+            const metadata =
+                type === CanvasNodeType.Config
+                    ? { ...nextImageConfigMetadata(), size: effectiveConfig.size, count: getGenerationCount(effectiveConfig.canvasImageCount || effectiveConfig.count) }
+                    : type === CanvasNodeType.Image
+                      ? { imageModelTargets: nextImageModelTargets() }
+                      : undefined;
             const newNode = createCanvasNode(type, pending.position, metadata);
             const connection = normalizeConnection(pending.connection.nodeId, newNode.id, [...nodesRef.current, newNode], pending.connection.handleType);
             if (!connection) {
@@ -521,7 +538,7 @@ function InfiniteCanvasPage() {
             setPendingConnectionCreate(null);
             setConnecting(null);
         },
-        [effectiveConfig.canvasImageCount, effectiveConfig.count, effectiveConfig.imageModelTargets, effectiveConfig.size, message, selectedImageModel, setConnecting, t],
+        [effectiveConfig.canvasImageCount, effectiveConfig.count, effectiveConfig.size, message, nextImageConfigMetadata, nextImageModelTargets, setConnecting, t],
     );
 
     const cancelPendingConnectionCreate = useCallback(() => {
@@ -670,12 +687,13 @@ function InfiniteCanvasPage() {
             const configMetadata =
                 type === CanvasNodeType.Config
                     ? {
-                          model: selectedImageModel,
-                          imageModelTargets: effectiveConfig.imageModelTargets,
+                          ...nextImageConfigMetadata(),
                           size: effectiveConfig.size,
                           count: getGenerationCount(effectiveConfig.canvasImageCount || effectiveConfig.count),
                       }
-                    : undefined;
+                    : type === CanvasNodeType.Image
+                      ? { imageModelTargets: nextImageModelTargets() }
+                      : undefined;
             const newNode = createCanvasNode(type, targetPosition, configMetadata);
 
             setNodes((prev) => [...prev, newNode]);
@@ -694,7 +712,7 @@ function InfiniteCanvasPage() {
                     : isBuiltinType(type) && type !== CanvasNodeType.Text && type !== CanvasNodeType.Audio && type !== CanvasNodeType.Group;
             if (wantsPanel) setDialogNodeId(newNode.id);
         },
-        [effectiveConfig.canvasImageCount, effectiveConfig.count, effectiveConfig.imageModelTargets, effectiveConfig.size, getCanvasCenter, selectedImageModel],
+        [effectiveConfig.canvasImageCount, effectiveConfig.count, effectiveConfig.size, getCanvasCenter, nextImageConfigMetadata, nextImageModelTargets],
     );
 
     const deleteNodes = useCallback(
@@ -1526,6 +1544,7 @@ function InfiniteCanvasPage() {
     }, []);
 
     const handleConfigNodeChange = useCallback((nodeId: string, patch: Partial<CanvasNodeData["metadata"]>) => {
+        if (patch?.imageModelTargets?.length) lastImageTargetsRef.current = patch.imageModelTargets;
         setNodes((prev) => prev.map((node) => (node.id === nodeId ? applyNodeConfigPatch(node, patch) : node)));
     }, []);
 
@@ -2608,8 +2627,7 @@ function InfiniteCanvasPage() {
                 },
                 {
                     prompt: "",
-                    model: selectedImageModel,
-                    imageModelTargets: effectiveConfig.imageModelTargets,
+                    ...nextImageConfigMetadata(),
                     size: effectiveConfig.size,
                     count: getGenerationCount(effectiveConfig.canvasImageCount || effectiveConfig.count),
                 },
@@ -2625,7 +2643,7 @@ function InfiniteCanvasPage() {
             setSelectedConnectionId(null);
             setDialogNodeId(configNode.id);
         },
-        [effectiveConfig.canvasImageCount, effectiveConfig.count, effectiveConfig.imageModelTargets, effectiveConfig.size, message, selectedImageModel, t],
+        [effectiveConfig.canvasImageCount, effectiveConfig.count, effectiveConfig.size, message, nextImageConfigMetadata, t],
     );
 
     const insertAssistantImage = useCallback(

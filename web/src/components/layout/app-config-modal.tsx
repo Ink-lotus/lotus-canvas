@@ -59,6 +59,7 @@ export function AppConfigPanel({ showDoneButton = false, initialTab = "channels"
     const config = useConfigStore((state) => state.config);
     const webdav = useConfigStore((state) => state.webdav);
     const updateConfig = useConfigStore((state) => state.updateConfig);
+    const setImageModelTargets = useConfigStore((state) => state.setImageModelTargets);
     const updateWebdavConfig = useConfigStore((state) => state.updateWebdavConfig);
     const shouldPromptContinue = useConfigStore((state) => state.shouldPromptContinue);
     const setConfigDialogOpen = useConfigStore((state) => state.setConfigDialogOpen);
@@ -220,7 +221,17 @@ export function AppConfigPanel({ showDoneButton = false, initialTab = "channels"
                                 <div className="mb-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                                     {modelGroups.map((group) => (
                                         <Form.Item key={group.modelKey} label={t(group.labelKey)} className="mb-0">
-                                            <ModelPicker config={config} value={config[group.modelKey]} onChange={(model) => updateConfig(group.modelKey, model)} capability={group.capability} fullWidth />
+                                            <ModelPicker
+                                                config={config}
+                                                value={config[group.modelKey]}
+                                                onChange={(model) => {
+                                                    updateConfig(group.modelKey, model);
+                                                    // A new default image model owns the channel selection: keep the channels serving the same model, drop the previous one's.
+                                                    if (group.capability === "image") setImageModelTargets([model, ...config.imageModelTargets]);
+                                                }}
+                                                capability={group.capability}
+                                                fullWidth
+                                            />
                                         </Form.Item>
                                     ))}
                                 </div>
