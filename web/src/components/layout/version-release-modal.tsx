@@ -71,18 +71,22 @@ export function VersionReleaseModal({ className, style }: VersionReleaseModalPro
                             </button>
                         </div>
                         <div className="mt-1 text-base font-semibold text-stone-950 dark:text-stone-100">{latestVersion}</div>
-                        {isDesktop && updateSupported && hasNewVersion ? (
+                        {/* 更新器报错必须与 hasNewVersion 解耦：检测本身失败时 hasNewVersion 必然为 false，
+                            若把报错挂在它下面，故障永远显示不出来，现象就成了"点了没反应" */}
+                        {isDesktop && updateSupported && (hasNewVersion || desktopUpdateState.status === "error") ? (
                             <div className="mt-3 flex flex-wrap items-center gap-2">
-                                {downloaded ? (
-                                    <Button type="primary" size="small" icon={<RefreshCw className="size-3.5" />} onClick={confirmInstall}>
-                                        {t("version.restartInstall")}
-                                    </Button>
-                                ) : (
-                                    <Button type="primary" size="small" icon={<Download className="size-3.5" />} loading={downloading} onClick={() => void downloadDesktopUpdate()}>
-                                        {downloading ? t("version.downloading", { percent: Math.round(desktopUpdateState.percent || 0) }) : t("version.installNow")}
-                                    </Button>
-                                )}
-                                {desktopUpdateState.status === "error" ? <span className="text-xs text-red-500">{desktopUpdateState.message || t("version.downloadFailed")}</span> : null}
+                                {hasNewVersion ? (
+                                    downloaded ? (
+                                        <Button type="primary" size="small" icon={<RefreshCw className="size-3.5" />} onClick={confirmInstall}>
+                                            {t("version.restartInstall")}
+                                        </Button>
+                                    ) : (
+                                        <Button type="primary" size="small" icon={<Download className="size-3.5" />} loading={downloading} onClick={() => void downloadDesktopUpdate()}>
+                                            {downloading ? t("version.downloading", { percent: Math.round(desktopUpdateState.percent || 0) }) : t("version.installNow")}
+                                        </Button>
+                                    )
+                                ) : null}
+                                {desktopUpdateState.status === "error" ? <span className="text-xs text-red-500">{desktopUpdateState.message || t("version.updateFailed")}</span> : null}
                             </div>
                         ) : null}
                     </div>

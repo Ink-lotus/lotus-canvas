@@ -6,7 +6,10 @@ import { parseChangelog, type ReleaseInfo } from "@/lib/release";
 
 const latestVersionUrl = "https://raw.githubusercontent.com/basketikun/infinite-canvas/main/VERSION";
 const latestChangelogUrl = "https://raw.githubusercontent.com/basketikun/infinite-canvas/main/CHANGELOG.md";
-const desktopReleasesUrl = "https://api.github.com/repos/Ink-lotus/lotus-canvas/releases?per_page=30";
+// 桌面端走 releases.atom 而不是 api.github.com：后者匿名配额是 60 次/小时/IP，
+// 走代理时该配额由整个出口 IP 上的所有人共享、长期为 0，而这次请求是更新检测的唯一入口——
+// 拿不到标签就不会调 checkForUpdates，electron-updater 根本不会启动。atom 不计入该配额。
+const desktopReleaseFeedUrl = "https://github.com/Ink-lotus/lotus-canvas/releases.atom";
 
 function readLocalReleases(): ReleaseInfo[] {
     return __APP_RELEASES__ || [];
@@ -71,12 +74,9 @@ export function useVersionCheck() {
     const checkLatestVersion = useCallback(async () => {
         try {
             if (api) {
-                const response = await fetch(desktopReleasesUrl, { headers: { Accept: "application/vnd.github+json" } });
-                if (!response.ok) return false;
-                const releases = (await response.json()) as Array<{ tag_name?: string; prerelease?: boolean; draft?: boolean; published_at?: string }>;
-                const latest = getLatestDesktopRelease(releases.filter((release) => !release.draft && !release.prerelease));
-                setLatestVersion(latest?.tag_name?.replace(/^desktop-v/, "") || currentVersion);
-                setDesktopReleaseTag(latest?.tag_name || null);
+                const latest = await fetchLatestDesktopRelease();
+                setLatestVersion(latest ? releaseTagVersion(latest.tag) : currentVersion);
+                setDesktopReleaseTag(latest?.tag || null);
                 return Boolean(latest);
             }
             const response = await fetch(latestVersionUrl);
@@ -94,19 +94,18 @@ export function useVersionCheck() {
             setChecking(true);
             try {
                 if (api) {
-                    const response = await fetch(desktopReleasesUrl, { headers: { Accept: "application/vnd.github+json" } });
-                    if (!response.ok) throw new Error(t("version.readFailed"));
-                    const releases = (await response.json()) as Array<{ tag_name?: string; body?: string; prerelease?: boolean; draft?: boolean; published_at?: string }>;
-                    const latest = getLatestDesktopRelease(releases.filter((release) => !release.draft && !release.prerelease));
-                    setLatestVersion(latest?.tag_name?.replace(/^desktop-v/, "") || currentVersion);
-                    setDesktopReleaseTag(latest?.tag_name || null);
-                    if (latest?.body?.trim()) setReleases(parseChangelog(latest.body));
-                    if (updateSupported && latest?.tag_name) {
-                        checkedDesktopReleaseTag.current = latest.tag_name;
-                        void api?.checkForUpdates(latest.tag_name).catch(() => undefined);
+                    const latest = await fetchLatestDesktopRelease();
+                    // 取不到任何 desktop-v* 发布时按失败处理：静默当成"已是最新"会把真实故障伪装成正常
+                    if (!latest) throw new Error(t("version.readFailed"));
+                    setLatestVersion(releaseTagVersion(latest.tag));
+                    setDesktopReleaseTag(latest.tag);
+                    if (latest.notes.trim()) setReleases(parseChangelog(latest.notes));
+                    if (updateSupported) {
+                        checkedDesktopReleaseTag.current = latest.tag;
+                        void api.checkForUpdates(latest.tag).catch(() => undefined);
                     }
                     if (showMessage) message.success(t("version.updated"));
-                    return Boolean(latest);
+                    return true;
                 }
                 const [versionResponse, changelogResponse] = await Promise.all([fetch(latestVersionUrl), fetch(latestChangelogUrl)]);
                 if (!versionResponse.ok) throw new Error(t("version.readFailed"));
@@ -172,12 +171,41 @@ export function useVersionCheck() {
     };
 }
 
-function getLatestDesktopRelease<T extends { tag_name?: string }>(releases: T[]) {
-    return releases
-        .filter((release) => /^desktop-v\d+\.\d+\.\d+$/.test(release.tag_name || ""))
-        .sort((a, b) => {
-            const av = toVersionParts(a.tag_name!.replace(/^desktop-v/, "")) || [0, 0, 0];
-            const bv = toVersionParts(b.tag_name!.replace(/^desktop-v/, "")) || [0, 0, 0];
-            return bv[0] - av[0] || bv[1] - av[1] || bv[2] - av[2];
-        })[0];
+type DesktopRelease = { tag: string; notes: string };
+
+const DESKTOP_TAG_PATTERN = /^desktop-v\d+\.\d+\.\d+$/;
+
+function releaseTagVersion(tag: string) {
+    return tag.replace(/^desktop-v/, "");
+}
+
+/**
+ * 解析 GitHub 的 releases.atom。
+ * <id> 形如 tag:github.com,2008:Repository/<repoId>/<tag>；<content> 是渲染成 HTML 的 release notes。
+ * 注意：atom 不含 prerelease 标记，无法像 REST 那样过滤预发布；当前发布流程（desktop-build.yml）
+ * 只产出正式版，因此不受影响。草稿不会出现在 atom 中。
+ */
+function parseDesktopReleaseFeed(xml: string): DesktopRelease[] {
+    const feed = new DOMParser().parseFromString(xml, "application/xml");
+    return Array.from(feed.getElementsByTagName("entry"))
+        .map((entry) => ({
+            tag: entry.getElementsByTagName("id")[0]?.textContent?.split("/").pop()?.trim() || "",
+            notes: entry.getElementsByTagName("content")[0]?.textContent || "",
+        }))
+        .filter((release) => DESKTOP_TAG_PATTERN.test(release.tag));
+}
+
+/** atom 已按发布时间倒序，仍按版本号显式取最大值，避免补发旧版本时选错 */
+function pickLatestDesktopRelease(releases: DesktopRelease[]) {
+    return releases.slice().sort((a, b) => {
+        const av = toVersionParts(releaseTagVersion(a.tag)) || [0, 0, 0];
+        const bv = toVersionParts(releaseTagVersion(b.tag)) || [0, 0, 0];
+        return bv[0] - av[0] || bv[1] - av[1] || bv[2] - av[2];
+    })[0];
+}
+
+async function fetchLatestDesktopRelease() {
+    const response = await fetch(desktopReleaseFeedUrl);
+    if (!response.ok) throw new Error(`releases.atom responded ${response.status}`);
+    return pickLatestDesktopRelease(parseDesktopReleaseFeed(await response.text()));
 }
