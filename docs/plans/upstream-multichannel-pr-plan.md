@@ -278,11 +278,11 @@ git --no-pager diff upstream/main..main -- web/src/stores/use-config-store.ts we
 
 分类结论（A/B/C 归属、9+9 的文件划分、剥离策略、PR 拆分）不随行号变化；若第 1 条命令显示文件数与 37 差异较大，说明合并期间引入了新改动，需要重新甄别。
 
-## 12. 执行记录（2026-08-25，首个 PR 已在本地完成）
+## 12. 执行记录（2026-08-25，首个 PR 已提交上游）
 
-分支 `feature/multi-channel-image-generation`（worktree `../lotus-canvas-upstream-pr`，base `upstream/main` = `a4aaf24`），**未推送、未提 PR**。PR 正文草稿见 `upstream-multichannel-pr1-description.md`。
+**上游 PR：https://github.com/basketikun/infinite-canvas/pull/208**（OPEN，14 文件 +499/−57，mergeable）
 
-三个原子提交：`be2a36d` 配置层 → `c82740c` 调度层 → `2dea335` 图片工作台。
+分支 `feature/multi-channel-image-generation`，已推到 `origin`（`Ink-lotus/lotus-canvas`），base 为 `upstream/main` = `2b59a00`。三个原子提交：`2401f5c` 配置层 → `32a39fe` 调度层 → `ac541d1` 图片工作台。实际提交的 PR 正文见 `upstream-multichannel-pr1-body.md`。
 
 ### 相对本文原始分类的修正
 
@@ -312,7 +312,35 @@ git --no-pager diff upstream/main..main -- web/src/stores/use-config-store.ts we
 
 ### 剩余步骤
 
-原 §10 第 12 步（推分支、开 PR）与第 13 步（画布层第二个 PR）均未执行；第 13 步按计划待首个 PR 合并后再做。
+第二个 PR（画布层）按计划待 #208 合并后再做。`main` 有 3 个提交尚未推 `origin`（等真机验证 `d4497b3`）。
+
+### 提交前 rebase 到 a4aaf24 → 2b59a00
+
+准备期间上游前进了两个提交（`7329e70` + 合并 `2b59a00`），`a4aaf24` 仍是祖先。`7329e70` 把
+`readAxiosError` 里 ERR_NETWORK 的文案从 `apiErrors.corsRequired` 改成 `requestFailed`，并**删掉了**
+`corsRequired` 这个 key。
+
+冲突两处，都在 `i18n/locales/*.ts` 第 47 行——`apiErrors` 在这两个文件里是一整行的单行对象，
+上游删 `corsRequired` 与本分支追加 `noImageChannel` 落在同一行。`services/api/image.ts` 不冲突
+（上游改 310 行附近的 `readAxiosError`，本分支改 9 行 import 与 806 行附近的 `ImageReadError` 透传）。
+
+解法：取上游那一行（已无 `corsRequired`），把 `noImageChannel` 追加进去。逐字符核对过
+`mine === theirs.replace(tail, tail+noImageChannel)`，并确认全仓已无 `corsRequired` 引用。
+rebase 后 i18n key 数 1584 → 1583（正是上游删掉的那一个），en/zh 仍然对齐。
+
+### 提交前重跑的验证
+
+- `npm run typecheck`：仅剩上游既有的 `canvas-generation-helpers.ts(51,47)`；三个提交逐个 typecheck 同样只有这一个。
+- `npm run build`：通过。
+- `prettier --check --end-of-line auto` 三个新文件：通过。
+- 桌面端痕迹 grep：无命中；PR 触及 13 个 `web/src` 文件 + `CHANGELOG.md`，不含禁止路径。
+- `git merge-tree --write-tree upstream/main HEAD`：退出 0，可干净合并（GitHub 也显示 MERGEABLE）。
+- i18n en/zh key 1583/1583 对齐，A 类新 key 齐备，`corsRequired` 没有被复活。
+
+### 已知未验证项
+
+PR 正文里的手工清单是**给上游作者复验**用的，未打勾。行为本身在 fork 里用真实渠道跑过，但 PR 分支
+（有三处刻意偏离）没有重新跑应用，只做了编译、构建和逐文件对照。
 
 ### 首个 PR 备好之后 main 上的增量（2026-08-25，`d4497b3`）
 
