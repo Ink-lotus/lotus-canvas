@@ -46,7 +46,7 @@
 
 以 `git diff --numstat upstream/main..main -- web/src` 为准。合并前的规模为 37 个文件，分三类。
 
-**A-纯：可整文件取用（11 个）**
+**A-纯：可整文件取用（12 个）**
 
 | 文件 | 说明 |
 | --- | --- |
@@ -61,6 +61,7 @@
 | `types/canvas.ts` | 2 行（含上游 +9） |
 | `services/api/image.ts` | `ImageReadError` 透传（§12 新增） |
 | `lib/canvas/canvas-resource-references.ts` | `imageToDataUrl` 改抛错后的兜底（§12 新增） |
+| `pages/canvas/hooks/use-plugin-host.tsx` | 插件 `generateImage` 纳入调度器（§12 新增，画布层→第二个 PR） |
 
 **A-混合：需逐 hunk 甄别（10 个）**
 
@@ -211,7 +212,7 @@ git --no-pager diff HEAD..main --stat -- web/src
 2. `feat(api): add image generation scheduler with multi-channel dispatch` — scheduler（含 i18n 错误文案）
 3. `feat(image): allow selecting multiple channels sharing one model` — picker + `pages/image` + app-config-modal 联动 + agent 工具
 
-第二个 PR（画布层，待首个合并后）：types/factory/helpers/两个面板/`project.tsx` + `canvas-node.tsx`/hover-toolbar 的 `showImageInfo` 链路（`image-channel-badge.tsx` 已随首个 PR 进入）。
+第二个 PR（画布层，待首个合并后）：types/factory/helpers/两个面板/`project.tsx` + `hooks/use-plugin-host.tsx` + `canvas-node.tsx`/hover-toolbar 的 `showImageInfo` 链路（`image-channel-badge.tsx` 已随首个 PR 进入）。`project.tsx` 的 scheduler 包裹点已从三处增加到五处（局部重绘、多角度，见 §12）。
 
 CHANGELOG 可加 2~3 行（沿用上游 `## Unreleased` 格式），`pending-test` 不带。
 
@@ -312,6 +313,15 @@ git --no-pager diff upstream/main..main -- web/src/stores/use-config-store.ts we
 ### 剩余步骤
 
 原 §10 第 12 步（推分支、开 PR）与第 13 步（画布层第二个 PR）均未执行；第 13 步按计划待首个 PR 合并后再做。
+
+### 首个 PR 备好之后 main 上的增量（2026-08-25，`d4497b3`）
+
+修掉了 `upstream-merge-20260824-followups.md` 待办 1：局部重绘（`maskEditImageNode`）、多角度
+（`generateAngleNode`）、插件 `generateImage` 三个入口纳入 `scheduleImageGeneration`。对本计划的影响：
+
+- **分叉文件数 39 → 40**，新增 `pages/canvas/hooks/use-plugin-host.tsx`（纯 A，画布层→第二个 PR）。
+- `project.tsx` 的 scheduler 包裹点从三处变五处，第二个 PR 移植时按 `main` 现状照搬。
+- 首个 PR 分支不受影响：这三处都在画布层，PR1 范围内没有文件被改动。
 
 
 
