@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { App } from "antd";
 import { useTranslation } from "react-i18next";
-import { APP_VERSION, IS_DESKTOP_BUILD } from "@/constant/env";
+import { APP_VERSION } from "@/constant/env";
 import { parseChangelog, type ReleaseInfo } from "@/lib/release";
 
 const latestVersionUrl = "https://raw.githubusercontent.com/basketikun/infinite-canvas/main/VERSION";
@@ -12,8 +12,11 @@ function readLocalReleases(): ReleaseInfo[] {
     return __APP_RELEASES__ || [];
 }
 
+// 桌面端一律按运行时判定：preload 在首次 render 前就注入了 window.lotusDesktop。
+// 不用编译期的 __DESKTOP_BUILD__，是因为漏设该构建变量时失败是静默的——
+// 版本号会退回上游 Web 版本，更新检查也会转去上游仓库。
 function desktopApi() {
-    return IS_DESKTOP_BUILD && typeof window !== "undefined" ? window.lotusDesktop : undefined;
+    return typeof window !== "undefined" ? window.lotusDesktop : undefined;
 }
 
 function toVersionParts(version: string) {
@@ -34,7 +37,7 @@ export function useVersionCheck() {
     const localReleases = useMemo(readLocalReleases, []);
     const api = desktopApi();
     const [appInfo, setAppInfo] = useState<{ isDesktop: boolean; portable: boolean; version: string; updateSupported: boolean } | null>(null);
-    const currentVersion = IS_DESKTOP_BUILD ? appInfo?.version || APP_VERSION : APP_VERSION;
+    const currentVersion = appInfo?.version || APP_VERSION;
     const [latestVersion, setLatestVersion] = useState(APP_VERSION);
     const [releases, setReleases] = useState<ReleaseInfo[]>(localReleases);
     const [checking, setChecking] = useState(false);
@@ -67,7 +70,7 @@ export function useVersionCheck() {
 
     const checkLatestVersion = useCallback(async () => {
         try {
-            if (IS_DESKTOP_BUILD) {
+            if (api) {
                 const response = await fetch(desktopReleasesUrl, { headers: { Accept: "application/vnd.github+json" } });
                 if (!response.ok) return false;
                 const releases = (await response.json()) as Array<{ tag_name?: string; prerelease?: boolean; draft?: boolean; published_at?: string }>;
@@ -84,13 +87,13 @@ export function useVersionCheck() {
         } catch {
             return false;
         }
-    }, [currentVersion]);
+    }, [api, currentVersion]);
 
     const checkLatestRelease = useCallback(
         async (showMessage = false) => {
             setChecking(true);
             try {
-                if (IS_DESKTOP_BUILD) {
+                if (api) {
                     const response = await fetch(desktopReleasesUrl, { headers: { Accept: "application/vnd.github+json" } });
                     if (!response.ok) throw new Error(t("version.readFailed"));
                     const releases = (await response.json()) as Array<{ tag_name?: string; body?: string; prerelease?: boolean; draft?: boolean; published_at?: string }>;

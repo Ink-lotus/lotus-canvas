@@ -168,7 +168,7 @@ zh-CN.ts 与 en-US.ts 结构一致。**只取 A 的 key**：
 fork 内共 4 个桌面检测入口，PR 分支上一个都不能出现：
 
 1. `window.location.protocol === "app:"`（`services/desktop-media-storage.ts` 的 `isDesktopMediaLibrary()`）
-2. 编译期常量 `__DESKTOP_BUILD__` / `IS_DESKTOP_BUILD`（`vite-env.d.ts`、`constant/env.ts`，仅 `use-version-check.ts` 使用）
+2. 编译期常量 `__DESKTOP_BUILD__` / `IS_DESKTOP_BUILD`（`vite-env.d.ts`、`constant/env.ts`）——桌面端判定已改为运行时读 `window.lotusDesktop`，`web/src` 内已无使用方；`vite.config.ts` 仍用 `LOTUS_DESKTOP_BUILD` 决定 `__APP_VERSION__` 取 `desktop/package.json` 版本还是根目录 `VERSION`
 3. preload 全局 `window.lotusDesktop`（`LotusDesktopApi`）
 4. 本地路由前缀 `/__lotus_media__` 与 `X-Lotus-File-Name` / `X-Lotus-Media-Origin` 请求头
 
