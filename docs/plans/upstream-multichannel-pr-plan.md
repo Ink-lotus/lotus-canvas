@@ -46,7 +46,7 @@
 
 以 `git diff --numstat upstream/main..main -- web/src` 为准。合并前的规模为 37 个文件，分三类。
 
-**A-纯：可整文件取用（9 个）**
+**A-纯：可整文件取用（11 个）**
 
 | 文件 | 说明 |
 | --- | --- |
@@ -59,8 +59,10 @@
 | `lib/canvas/canvas-node-factory.ts` | 单行 `imageModelTargets` |
 | `lib/agent/agent-site-tools.ts` | 4 处 |
 | `types/canvas.ts` | 2 行（含上游 +9） |
+| `services/api/image.ts` | `ImageReadError` 透传（§12 新增） |
+| `lib/canvas/canvas-resource-references.ts` | `imageToDataUrl` 改抛错后的兜底（§12 新增） |
 
-**A-混合：需逐 hunk 甄别（9 个）**
+**A-混合：需逐 hunk 甄别（10 个）**
 
 | 文件 | 混入类别 |
 | --- | --- |
@@ -68,13 +70,14 @@
 | `components/layout/app-config-modal.tsx` | A + C |
 | `components/canvas/canvas-node-hover-toolbar.tsx` | A + B 各半 |
 | `components/canvas/canvas-node.tsx` | A + B |
-| `lib/canvas/canvas-generation-helpers.ts` | A + C |
+| `lib/canvas/canvas-generation-helpers.ts` | A + 上游 TS 修复（见 §12） |
+| `services/image-storage.ts` | A + B（§12 修正，原误判为纯 B） |
 | `pages/canvas/project.tsx` | A + B + C |
 | `pages/image/index.tsx` | A + B 深度交织（同 hunk 内） |
 | `i18n/locales/zh-CN.ts` | A + B + C，按 key 切 |
 | `i18n/locales/en-US.ts` | 同上 |
 
-**B 类 — 排除（14 个）**：`components/desktop-media-actions.tsx`、`services/desktop-media-storage.ts`、`services/file-storage.ts`、`services/image-storage.ts`、`components/layout/config-local-storage.tsx`、`components/layout/version-release-modal.tsx`、`hooks/use-version-check.ts`、`constant/env.ts`、`vite-env.d.ts`、`pages/assets/index.tsx`、`pages/video/index.tsx`、`components/agent/local-agent-panel.tsx`、`services/api/audio.ts`、`services/api/video.ts`。
+**B 类 — 排除（13 个）**：`components/desktop-media-actions.tsx`、`services/desktop-media-storage.ts`、`services/file-storage.ts`、`components/layout/config-local-storage.tsx`、`components/layout/version-release-modal.tsx`、`hooks/use-version-check.ts`、`constant/env.ts`、`vite-env.d.ts`、`pages/assets/index.tsx`、`pages/video/index.tsx`、`components/agent/local-agent-panel.tsx`、`services/api/audio.ts`、`services/api/video.ts`。
 
 **C 类 — 排除（5 个）**：`canvas-config-composer.tsx`、`canvas-prompt-chip-input.tsx`、`canvas-resource-mention-textarea.tsx`、`canvas-side-panel.tsx`、`services/config-file.ts`。
 
@@ -193,12 +196,12 @@ git --no-pager diff HEAD..main --stat -- web/src
 
 1. **scheduler 中文硬编码**：`image-generation-scheduler.ts` 中两处 `"没有可用的图片生成渠道"` 未接 i18n。上游默认英文，需改为可翻译或英文错误信息。
 2. **必填字段兼容性**：`ModelChannel.maxConcurrency` 与 `AiConfig.imageModelTargets` 在 fork 里是**必填**，靠 `persist` 的 `merge` + `normalize*` 兜旧配置。提 PR 时建议改为可选，降低上游存量配置风险与 review 阻力。
-3. **prettier**：fork 现存文件本身 `prettier --check` 就不通过（历史遗留）。只按上游现有风格写新增行，**不要**跑 `prettier --write` 造成大面积无关格式变更；3 个新文件应能通过检查。
+3. **prettier**：fork 现存文件本身 `prettier --check` 就不通过，成因有两层——本地 `core.autocrlf=true` 让工作区是 CRLF 而配置要求 `endOfLine: "lf"`（用 `--end-of-line auto` 可排除这一层），排除后上游仍有若干真实违规（`model-picker.tsx`、`services/api/video.ts`、`canvas-node.tsx`）。只按上游现有风格写新增行，**不要**跑 `prettier --write` 造成大面积无关格式变更；3 个新文件应能通过检查。
 4. **`GeneratedImage.model` 落地**：上游 `d536618` 改了 `services/api/image.ts` + `image-storage.ts` 的临时 URL 持久化。合并时应已处理，PR 前复核实际渠道名写入结果记录的路径仍成立。
 
 ## 7. PR 拆分
 
-**首个 PR 不碰画布层**，收「配置层 + 调度层 + 图片工作台」：`use-config-store.ts`、`channel-editor-drawer.tsx`、`app-config-modal.tsx`、`image-model-target-picker.tsx`、`image-generation-scheduler.ts`、`pages/image/index.tsx`、`agent-site-tools.ts`、i18n。
+**首个 PR 不碰画布层**，收「配置层 + 调度层 + 图片工作台」：`use-config-store.ts`、`channel-editor-drawer.tsx`、`app-config-modal.tsx`、`image-model-target-picker.tsx`、`image-channel-badge.tsx`（`pages/image` 也用它，必须同批）、`image-generation-scheduler.ts`、`image-storage.ts`（仅 A 部分）、`services/api/image.ts`、`canvas-resource-references.ts`、`pages/image/index.tsx`、`agent-site-tools.ts`、i18n。
 
 理由：体积可控、避开 A/B 交织最重的 `project.tsx`（九处 `origin` 参数 + `downloadBatchImage`），且基础层进入上游后，第二个 PR 的画布改动可以直接建立在上游已有的 store/scheduler 之上。
 
@@ -208,7 +211,7 @@ git --no-pager diff HEAD..main --stat -- web/src
 2. `feat(api): add image generation scheduler with multi-channel dispatch` — scheduler（含 i18n 错误文案）
 3. `feat(image): allow selecting multiple channels sharing one model` — picker + `pages/image` + app-config-modal 联动 + agent 工具
 
-第二个 PR（画布层，待首个合并后）：types/factory/helpers/两个面板/`project.tsx` + `image-channel-badge.tsx` + `canvas-node.tsx`/hover-toolbar 的 `showImageInfo` 链路。
+第二个 PR（画布层，待首个合并后）：types/factory/helpers/两个面板/`project.tsx` + `canvas-node.tsx`/hover-toolbar 的 `showImageInfo` 链路（`image-channel-badge.tsx` 已随首个 PR 进入）。
 
 CHANGELOG 可加 2~3 行（沿用上游 `## Unreleased` 格式），`pending-test` 不带。
 
@@ -273,6 +276,42 @@ git --no-pager diff upstream/main..main -- web/src/stores/use-config-store.ts we
 ```
 
 分类结论（A/B/C 归属、9+9 的文件划分、剥离策略、PR 拆分）不随行号变化；若第 1 条命令显示文件数与 37 差异较大，说明合并期间引入了新改动，需要重新甄别。
+
+## 12. 执行记录（2026-08-25，首个 PR 已在本地完成）
+
+分支 `feature/multi-channel-image-generation`（worktree `../lotus-canvas-upstream-pr`，base `upstream/main` = `a4aaf24`），**未推送、未提 PR**。PR 正文草稿见 `upstream-multichannel-pr1-description.md`。
+
+三个原子提交：`be2a36d` 配置层 → `c82740c` 调度层 → `2dea335` 图片工作台。
+
+### 相对本文原始分类的修正
+
+1. **文件数 37 → 39**，新增两个 A 类文件，均来自本文编写之后的提交：
+   - `services/api/image.ts`（来自合并 `c0a8379` 的冲突解决）——`requestEdit` 透传 `ImageReadError`；
+   - `lib/canvas/canvas-resource-references.ts`（来自 `4f3ae62`）——`imageToDataUrl` 改抛错后保留按标题的报错文案。
+2. **`services/image-storage.ts` 从纯 B 改为 A + B**。`ImageReadError` 类、`imageToDataUrl` 的抛错改造、`blobToDataUrl` 的 reject 都是 A：scheduler 直接 `import { ImageReadError }`，少了这部分，一张读不出的本地参考图会被当成渠道故障、逐渠道各发一次真实请求。其余（`desktop-media-storage` 导入与全部 `isDesktopMediaLibrary()` 分支）仍是 B。
+3. **`canvas-generation-helpers.ts` 的 `hydrateCanvasImages` hunk 不是 C，是 `71a3de0` 的 TypeScript 修复**。上游 `a4aaf24` 的 `npm run typecheck` 本身就有 1 个错误：`canvas-generation-helpers.ts(51,47) TS18048: 'node.metadata' is possibly 'undefined'`。该文件属画布层，首个 PR 未带，所以这个错误在 PR 分支上仍然存在——**PR 分支的 typecheck 基线是 1 个错误，不是 0**。
+4. **`image-channel-badge.tsx` 必须进首个 PR**（§7 原写在第二个 PR）：`pages/image/index.tsx` 的结果卡片就用它。
+5. `pages/image/index.tsx` 中 `storedById` / `if (image.storageKey) return image;` / 三处 `image.storageKey ? … : uploadImage(…)` 守卫全部来自 `40e09e5`，作用是避免往桌面媒体库重复写文件，**判为 B 已剔除**。
+
+### 相对 fork `main` 的三处刻意偏离
+
+1. `ModelChannel.maxConcurrency` 与 `AiConfig.imageModelTargets` 改为可选（§6-2），连带 `agent-site-tools.ts`
+   的 `config.imageModelTargets?.[0]`、`app-config-modal.tsx` 的 `...(config.imageModelTargets || [])`
+   与 `channel.maxConcurrency || 1`。
+2. scheduler 两处 `"没有可用的图片生成渠道"` 改走新增的 `apiErrors.noImageChannel`（§6-1）。
+3. `image-model-target-picker.tsx` 一处 JSX 按 prettier 期望换行。
+
+### 自检结果
+
+- 桌面端痕迹 grep：无命中。
+- `git diff upstream/main...HEAD --name-only`：13 个 `web/src` 文件 + `CHANGELOG.md`；不含 `desktop/**`、`.github/workflows/desktop-*.yml`、`VERSION`、`pending-test*`、`docs/plans/**`。
+- `git diff HEAD..main`：逐文件核对残余差异 = B + C + 第二个 PR 的画布层 + 上述三处偏离，无遗漏的 A。
+- 三个提交逐个 `npm run typecheck`：各自仅剩上游既有的那 1 个错误；`npm run build` 通过。
+- i18n en/zh key 数 1584 / 1584 对齐，A 类新 key 齐备，B/C key 未泄漏。
+
+### 剩余步骤
+
+原 §10 第 12 步（推分支、开 PR）与第 13 步（画布层第二个 PR）均未执行；第 13 步按计划待首个 PR 合并后再做。
 
 
 
