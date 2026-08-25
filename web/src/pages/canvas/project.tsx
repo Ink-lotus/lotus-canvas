@@ -1847,10 +1847,18 @@ function InfiniteCanvasPage() {
             setDialogNodeId(childId);
             const controller = startGenerationRequest(childId, node.id, childId);
             try {
-                const image = await requestEdit(generationConfig, prompt, [source], { id: `${node.id}-mask`, name: "mask.png", type: "image/png", dataUrl: payload.maskDataUrl }, { signal: controller.signal }).then((items) => items[0]);
+                const mask = { id: `${node.id}-mask`, name: "mask.png", type: "image/png", dataUrl: payload.maskDataUrl };
+                // The mask stays inside the run closure so every channel attempt sends it; a model that rejects masks falls back to the next channel.
+                const scheduled = await scheduleImageGeneration(
+                    generationConfig,
+                    generationConfig.imageModelTargets,
+                    (target) => requestEdit({ ...generationConfig, model: target, imageModel: target }, prompt, [source], mask, { signal: controller.signal }),
+                    { signal: controller.signal, preferredTarget: generationConfig.imageModel, fallbackOnError: true },
+                );
+                const image = scheduled.value[0];
                 const uploaded = await uploadImage(image.dataUrl, { origin: "generated" });
                 const size = fitNodeSize(uploaded.width, uploaded.height, node.width, node.height);
-                setNodes((prev) => prev.map((item) => (item.id === childId ? { ...item, width: size.width, height: size.height, metadata: { ...item.metadata, ...imageMetadata(uploaded), prompt, ...generationMetadata } } : item)));
+                setNodes((prev) => prev.map((item) => (item.id === childId ? { ...item, width: size.width, height: size.height, metadata: { ...item.metadata, ...imageMetadata(uploaded), prompt, ...generationMetadata, model: scheduled.target } } : item)));
             } catch (error) {
                 if (isGenerationCanceled(error)) return;
                 const errorDetails = error instanceof Error ? error.message : t("canvas.projectPage.maskFailed");
@@ -1901,9 +1909,8 @@ function InfiniteCanvasPage() {
             const imageConfig = NODE_DEFAULT_SIZE[CanvasNodeType.Image];
             const title = buildAngleLabel(params);
             const prompt = buildAnglePrompt(params);
-            const generationMetadata = buildImageGenerationMetadata("edit", generationConfig, 1, [
-                { id: node.id, name: `${node.title || node.id}.png`, type: node.metadata.mimeType || "image/png", dataUrl: node.metadata.content, storageKey: node.metadata.storageKey },
-            ]);
+            const source = { id: node.id, name: `${node.title || node.id}.png`, type: node.metadata.mimeType || "image/png", dataUrl: node.metadata.content, storageKey: node.metadata.storageKey };
+            const generationMetadata = buildImageGenerationMetadata("edit", generationConfig, 1, [source]);
             setAngleNodeId(null);
             setRunningNodeId(childId);
             setNodes((prev) => [
@@ -1923,16 +1930,16 @@ function InfiniteCanvasPage() {
             setDialogNodeId(childId);
             const controller = startGenerationRequest(childId, node.id, childId);
             try {
-                const image = await requestEdit(
+                const scheduled = await scheduleImageGeneration(
                     generationConfig,
-                    prompt,
-                    [{ id: node.id, name: `${node.title || node.id}.png`, type: node.metadata.mimeType || "image/png", dataUrl: node.metadata.content, storageKey: node.metadata.storageKey }],
-                    undefined,
-                    { signal: controller.signal },
-                ).then((items) => items[0]);
+                    generationConfig.imageModelTargets,
+                    (target) => requestEdit({ ...generationConfig, model: target, imageModel: target }, prompt, [source], undefined, { signal: controller.signal }),
+                    { signal: controller.signal, preferredTarget: generationConfig.imageModel, fallbackOnError: true },
+                );
+                const image = scheduled.value[0];
                 const uploaded = await uploadImage(image.dataUrl, { origin: "generated" });
                 const size = fitNodeSize(uploaded.width, uploaded.height, imageConfig.width, imageConfig.height);
-                setNodes((prev) => prev.map((item) => (item.id === childId ? { ...item, width: size.width, height: size.height, metadata: { ...item.metadata, ...imageMetadata(uploaded), prompt, ...generationMetadata } } : item)));
+                setNodes((prev) => prev.map((item) => (item.id === childId ? { ...item, width: size.width, height: size.height, metadata: { ...item.metadata, ...imageMetadata(uploaded), prompt, ...generationMetadata, model: scheduled.target } } : item)));
             } catch (error) {
                 if (isGenerationCanceled(error)) return;
                 const errorDetails = error instanceof Error ? error.message : t("canvas.projectPage.generationFailed");

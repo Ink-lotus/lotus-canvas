@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, type Dispatch, type MutableRefObject, 
 import { useTranslation } from "react-i18next";
 
 import { requestEdit, requestGeneration, requestImageQuestion, type AiTextMessage } from "@/services/api/image";
+import { scheduleImageGeneration } from "@/services/api/image-generation-scheduler";
 import { requestVideoGeneration, storeGeneratedVideo } from "@/services/api/video";
 import { decodeChannelModel, selectableModelsByCapability, type AiConfig, type ModelCapability } from "@/stores/use-config-store";
 import { buildGenerationConfig } from "@/lib/canvas/canvas-generation-helpers";
@@ -53,8 +54,18 @@ export function usePluginHost(params: PluginHostParams) {
                 const config = { ...buildGenerationConfig(effectiveConfig, undefined, "image"), count: String(options?.count || 1), ...(options?.model ? { model: options.model } : {}), ...(options?.size ? { size: options.size } : {}) };
                 ensureReady(config);
                 const references = toReferences(options?.references);
-                const items = references.length ? await requestEdit(config, prompt, references, undefined, { signal: options?.signal }) : await requestGeneration(config, prompt, { signal: options?.signal });
-                return { images: items.map((item) => item.dataUrl) };
+                // An explicit options.model is the plugin's own channel choice, so it stays the only target; otherwise the request joins the configured multi-channel pool.
+                const targets = options?.model ? [options.model] : config.imageModelTargets;
+                const scheduled = await scheduleImageGeneration(
+                    config,
+                    targets,
+                    (target) => {
+                        const requestConfig = { ...config, model: target, imageModel: target };
+                        return references.length ? requestEdit(requestConfig, prompt, references, undefined, { signal: options?.signal }) : requestGeneration(requestConfig, prompt, { signal: options?.signal });
+                    },
+                    { signal: options?.signal, preferredTarget: config.imageModel, fallbackOnError: true },
+                );
+                return { images: scheduled.value.map((item) => item.dataUrl) };
             },
             generateVideo: async (prompt, options) => {
                 const config = {

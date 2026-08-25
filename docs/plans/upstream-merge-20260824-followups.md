@@ -2,18 +2,37 @@
 
 合并提交：`c0a8379`（`main`，尚未推送）。基线：`upstream/main` = `d536618`。
 
-## 待办 1：三处生图入口未纳入 `scheduleImageGeneration`
+## 待办 1：三处生图入口未纳入 `scheduleImageGeneration`（已修复 2026-08-25）
 
-这三处直接调用 `requestGeneration` / `requestEdit`，绕过渠道调度，因此不受 `maxConcurrency` 限制、
+这三处原先直接调用 `requestGeneration` / `requestEdit`，绕过渠道调度，因此不受 `maxConcurrency` 限制、
 不参与多渠道轮询、失败时不回退到其他渠道：
 
-- `web/src/pages/canvas/project.tsx:1816` — `maskEditImageNode`（局部重绘）
-- `web/src/pages/canvas/project.tsx:1891` — `generateAngleNode`（多角度）
-- `web/src/pages/canvas/hooks/use-plugin-host.tsx:56` — 插件 `generateImage` 桥
+- `web/src/pages/canvas/project.tsx` — `maskEditImageNode`（局部重绘）
+- `web/src/pages/canvas/project.tsx` — `generateAngleNode`（多角度）
+- `web/src/pages/canvas/hooks/use-plugin-host.tsx` — 插件 `generateImage` 桥
 
-本次合并按「保持现状」处理：上游没有新增生图入口，这三处的行为与合并前一致，属于既有欠账而非
-本次回归。纳管时注意 `maskEditImageNode` 需要把 mask 一起带进 `run` 闭包，且 hydrate 类操作要
-留在闭包外，避免每个渠道重复执行。
+合并当时按「保持现状」处理（上游没有新增生图入口，属既有欠账而非本次回归），现已全部纳管，
+统一用与其他单张入口一致的 `{ preferredTarget: config.imageModel, fallbackOnError: true }`：
+
+- `maskEditImageNode`：mask 对象提到 `try` 内、放进 `run` 闭包，保证每次换渠道重试都带上 mask；
+  蒙版不被支持的渠道（`geminiMaskUnsupported` / `maskModelUnsupported`）现在会自动回退到下一个渠道。
+- `generateAngleNode`：参考图字面量提取为 `source` 常量，`buildImageGenerationMetadata` 与 `run`
+  闭包复用同一对象。
+- 插件 `generateImage`：`options.model` 是插件自己的渠道选择，给了就作为唯一 target（否则
+  `normalizeImageModelTargets` 会用全局勾选的同名渠道把它顶掉）；没给才汇入全局多渠道池。
+  `count` 语义不变，仍是一次请求要 N 张，调度器把它当一个 job。
+- 三处成功后都把节点 `metadata.model` 覆盖为 `scheduled.target`，渠道角标与节点信息才显示真实渠道。
+
+`hydrateNodeGenerationContext` 之类的 hydrate 操作本来就不在这三处的路径上，无需搬动。
+
+验证：`npm run typecheck` 与 `npm run build` 均通过；全仓 `requestEdit(` / `requestGeneration(` 调用点
+（除 `services/api/image.ts` 自身）现在共 7 处，全部位于 `scheduleImageGeneration` 的 `run` 闭包内。
+
+遗留（未在本次修复范围内）：`generateAngleNode`、插件 `generateImage`、以及插件内置面板路径
+（`project.tsx` 的 `builtinPanel.writeBackToSelf` 分支）的就绪校验都只查 `config.model`，没有像
+`maskEditImageNode` 和批量生成那样逐个校验 `imageModelTargets`。后果是可能把请求派发到缺 Key 的
+渠道，靠 `fallbackOnError` 兜回来，多一次无效往返。要改应当四处一起改，或者反过来把「必须全部就绪」
+放宽成「过滤掉未就绪的 target」——后者是设计变更，需要单独决定。
 
 ## 待办 2：派生图片节点重试/多角度会落回全局渠道集合
 
