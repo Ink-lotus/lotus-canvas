@@ -7,6 +7,7 @@ import { formatBytes } from "@/lib/image-utils";
 import { getNodeDefinition } from "@/lib/canvas/node-registry";
 import { buildNodeContext } from "@/lib/canvas/plugin-node-context";
 import { useThemeStore } from "@/stores/use-theme-store";
+import { useConfigStore, modelOptionChannelName } from "@/stores/use-config-store";
 import { CanvasResourceMentionTextarea } from "./canvas-resource-mention-textarea";
 import { CanvasNodeType, type CanvasNodeData, type CanvasNodeImage, type CanvasNodeText, type Position } from "@/types/canvas";
 import type { CanvasNodeContext, CanvasPluginHost } from "@/types/canvas-plugin";
@@ -748,6 +749,7 @@ function ImageContent({
     onViewBatchImage?: (imageId: string) => void;
 }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
+    const config = useConfigStore((state) => state.config);
     const { t } = useTranslation();
     const images = node.metadata?.images || [];
     const batchCount = images.length;
@@ -776,12 +778,19 @@ function ImageContent({
                     <ImageSlotStatus image={primaryImage} />
                 )}
             </div>
-            {primaryImage?.status === "error" ? <BatchImageFailureActions placement="left" onRetry={() => onRetryBatchImage?.(primaryImage.id)} onDelete={() => onDeleteBatchImage?.(primaryImage.id)} /> : null}
+            {primaryImage?.status === "error" ? <BatchImageFailureActions placement="left" image={primaryImage} onRetry={() => onRetryBatchImage?.(primaryImage.id)} onDelete={() => onDeleteBatchImage?.(primaryImage.id)} /> : null}
             {primaryImage?.content ? (
                 <button type="button" className="absolute left-2.5 top-2.5 z-30 flex h-8 items-center gap-1 rounded-lg border px-2 text-[10px] font-medium shadow-[0_6px_18px_rgba(15,23,42,.16)] backdrop-blur-md transition hover:scale-[1.02]" style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.toolbar.activeText }} title={t("common.download")} onClick={(event) => (event.stopPropagation(), onDownloadBatchImage?.(primaryImage.id))}>
                     <Download className="size-3" />
                     {t("common.download")}
                 </button>
+            ) : null}
+            {primaryImage?.model ? (
+                <div className="pointer-events-none absolute bottom-2.5 right-2.5 z-30 max-w-[calc(100%-20px)]">
+                    <span className="inline-block max-w-full truncate rounded-md bg-black/55 px-2 py-1 text-[11px] font-medium leading-none text-white backdrop-blur-sm">
+                        {modelOptionChannelName(config, primaryImage.model)}
+                    </span>
+                </div>
             ) : null}
             {isBatchRoot ? (
                 <button
@@ -806,6 +815,7 @@ function ImageContent({
 
 function ExpandedImageCard({ node, image, index, onView, onSetPrimary, onDuplicate, onDownload, onRetry, onDelete }: { node: CanvasNodeData; image: CanvasNodeImage; index: number; onView: () => void; onSetPrimary: () => void; onDuplicate: () => void; onDownload: () => void; onRetry: () => void; onDelete: () => void }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
+    const config = useConfigStore((state) => state.config);
     const { t } = useTranslation();
     const count = node.metadata?.images?.length || 0;
     const columns = Math.min(count, 4);
@@ -859,24 +869,41 @@ function ExpandedImageCard({ node, image, index, onView, onSetPrimary, onDuplica
                     </button>
                 </div>
             ) : null}
-            {image.status === "error" ? <BatchImageFailureActions placement="right" onRetry={onRetry} onDelete={onDelete} /> : null}
+            {image.model ? (
+                <div className="pointer-events-none absolute bottom-2 right-2 z-30 max-w-[calc(100%-16px)]">
+                    <span className="inline-block max-w-full truncate rounded-md bg-black/55 px-2 py-1 text-[11px] font-medium leading-none text-white backdrop-blur-sm">
+                        {modelOptionChannelName(config, image.model)}
+                    </span>
+                </div>
+            ) : null}
+            {image.status === "error" ? <BatchImageFailureActions placement="right" image={image} onRetry={onRetry} onDelete={onDelete} /> : null}
         </div>
     );
 }
 
-function BatchImageFailureActions({ placement, onRetry, onDelete }: { placement: "left" | "right"; onRetry: () => void; onDelete: () => void }) {
+function BatchImageFailureActions({ placement, image, onRetry, onDelete }: { placement: "left" | "right"; image: CanvasNodeImage; onRetry: () => void; onDelete: () => void }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
+    const config = useConfigStore((state) => state.config);
     const { t } = useTranslation();
     return (
-        <div className={`absolute top-3 z-30 flex items-center gap-1.5 ${placement === "left" ? "left-3" : "right-3"}`}>
-            <button type="button" className="flex h-8 items-center gap-1.5 rounded-lg border px-2.5 text-xs font-medium shadow-sm transition hover:scale-[1.02]" style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }} onClick={(event) => (event.stopPropagation(), onRetry())}>
-                <RefreshCw className="size-3.5" />
-                {t("canvas.node.retry")}
-            </button>
-            <button type="button" className="grid size-8 place-items-center rounded-lg border shadow-sm transition hover:scale-[1.02]" style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }} onClick={(event) => (event.stopPropagation(), onDelete())} aria-label={t("common.delete")} title={t("common.delete")}>
-                <Trash2 className="size-3.5" />
-            </button>
-        </div>
+        <>
+            <div className={`absolute top-3 z-30 flex items-center gap-1.5 ${placement === "left" ? "left-3" : "right-3"}`}>
+                <button type="button" className="flex h-8 items-center gap-1.5 rounded-lg border px-2.5 text-xs font-medium shadow-sm transition hover:scale-[1.02]" style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }} onClick={(event) => (event.stopPropagation(), onRetry())}>
+                    <RefreshCw className="size-3.5" />
+                    {t("canvas.node.retry")}
+                </button>
+                <button type="button" className="grid size-8 place-items-center rounded-lg border shadow-sm transition hover:scale-[1.02]" style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }} onClick={(event) => (event.stopPropagation(), onDelete())} aria-label={t("common.delete")} title={t("common.delete")}>
+                    <Trash2 className="size-3.5" />
+                </button>
+            </div>
+            {image.model ? (
+                <div className={`pointer-events-none absolute bottom-3 z-30 max-w-[calc(100%-24px)] ${placement === "left" ? "left-3" : "right-3"}`}>
+                    <span className="inline-block max-w-full truncate rounded-md bg-black/55 px-2 py-1 text-[11px] font-medium leading-none text-white backdrop-blur-sm">
+                        {modelOptionChannelName(config, image.model)}
+                    </span>
+                </div>
+            ) : null}
+        </>
     );
 }
 
