@@ -1923,6 +1923,11 @@ function InfiniteCanvasPage() {
             metadata: {
                 ...imageMetadata(image),
                 prompt: node.metadata?.prompt,
+                model: node.metadata?.model,
+                imageModelTargets: node.metadata?.imageModelTargets,
+                quality: node.metadata?.quality,
+                size: node.metadata?.size,
+                background: node.metadata?.background,
             },
         };
         setNodes((prev) => [...prev, child]);
@@ -1956,6 +1961,11 @@ function InfiniteCanvasPage() {
                         metadata: {
                             ...imageMetadata(image),
                             prompt: node.metadata?.prompt,
+                            model: node.metadata?.model,
+                            imageModelTargets: node.metadata?.imageModelTargets,
+                            quality: node.metadata?.quality,
+                            size: node.metadata?.size,
+                            background: node.metadata?.background,
                         },
                     } satisfies CanvasNodeData;
                 }),
@@ -2056,6 +2066,11 @@ function InfiniteCanvasPage() {
             metadata: {
                 ...imageMetadata(image),
                 prompt: node.metadata?.prompt,
+                model: node.metadata?.model,
+                imageModelTargets: node.metadata?.imageModelTargets,
+                quality: node.metadata?.quality,
+                size: node.metadata?.size,
+                background: node.metadata?.background,
             },
         };
         setNodes((prev) => [...prev, child]);

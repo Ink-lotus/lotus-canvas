@@ -104,10 +104,16 @@ export default function ImagePage() {
     const generationController = useRef<AbortController | null>(null);
     const retryControllers = useRef(new Map<string, AbortController>());
 
-    const modelTargets = resolveImageModelTargets(effectiveConfig);
+    // Local state for workbench generation parameters
+    const [localModelTargets, setLocalModelTargets] = useState<string[]>(() => resolveImageModelTargets(effectiveConfig));
+    const [localQuality, setLocalQuality] = useState<string>(() => effectiveConfig.quality);
+    const [localSize, setLocalSize] = useState<string>(() => effectiveConfig.size);
+    const [localCount, setLocalCount] = useState<string>(() => effectiveConfig.count);
+
+    const modelTargets = localModelTargets.length > 0 ? localModelTargets : resolveImageModelTargets(effectiveConfig);
     const model = modelTargets[0] || effectiveConfig.imageModel || effectiveConfig.model;
     const canGenerate = Boolean(prompt.trim());
-    const generationCount = Math.max(1, Math.min(10, Number(config.count) || 1));
+    const generationCount = Math.max(1, Math.min(10, Number(localCount) || 1));
 
     useEffect(() => {
         if (!running || !startedAt) return;
@@ -340,7 +346,7 @@ export default function ImagePage() {
             openConfigDialog(true);
             return null;
         }
-        return { text, config: { ...effectiveConfig, model, imageModelTargets: modelTargets, count: "1" }, references: [...references] };
+        return { text, config: { ...effectiveConfig, model, imageModelTargets: modelTargets, quality: localQuality, size: localSize, count: "1" }, references: [...references] };
     };
 
     const runGenerationSlot = async (id: string, task: Promise<GeneratedImageResult>, signal: AbortSignal) => {
@@ -514,7 +520,16 @@ export default function ImagePage() {
                             </div>
 
                             <div className="hidden gap-4 sm:grid sm:grid-cols-2">
-                                <GenerationSettings />
+                                <GenerationSettings
+                                    modelTargets={localModelTargets}
+                                    quality={localQuality}
+                                    size={localSize}
+                                    count={localCount}
+                                    onModelTargetsChange={setLocalModelTargets}
+                                    onQualityChange={setLocalQuality}
+                                    onSizeChange={setLocalSize}
+                                    onCountChange={setLocalCount}
+                                />
                             </div>
                         </div>
 
@@ -577,7 +592,16 @@ export default function ImagePage() {
             </Drawer>
             <Drawer title={t("workbench.settings")} placement="bottom" size="82vh" open={settingsOpen} onClose={() => setSettingsOpen(false)}>
                 <div className="grid grid-cols-2 gap-3 pb-4">
-                    <GenerationSettings />
+                    <GenerationSettings
+                        modelTargets={localModelTargets}
+                        quality={localQuality}
+                        size={localSize}
+                        count={localCount}
+                        onModelTargetsChange={setLocalModelTargets}
+                        onQualityChange={setLocalQuality}
+                        onSizeChange={setLocalSize}
+                        onCountChange={setLocalCount}
+                    />
                 </div>
             </Drawer>
             <PromptSelectDialog open={promptDialogOpen} onOpenChange={setPromptDialogOpen} onSelect={setPrompt} />
@@ -589,10 +613,8 @@ export default function ImagePage() {
     );
 }
 
-function GenerationSettings() {
+function GenerationSettings({ modelTargets, quality, size, count, onModelTargetsChange, onQualityChange, onSizeChange, onCountChange }: { modelTargets: string[]; quality: string; size: string; count: string; onModelTargetsChange: (targets: string[]) => void; onQualityChange: (value: string) => void; onSizeChange: (value: string) => void; onCountChange: (value: string) => void }) {
     const config = useEffectiveConfig();
-    const updateConfig = useConfigStore((state) => state.updateConfig);
-    const setImageModelTargets = useConfigStore((state) => state.setImageModelTargets);
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const { t } = useTranslation();
@@ -601,10 +623,14 @@ function GenerationSettings() {
         <>
             <label className="col-span-2 block min-w-0 sm:col-span-1">
                 <span className="mb-1.5 block text-sm font-semibold sm:mb-2 sm:text-base">{t("workbench.model")}</span>
-                <ImageModelTargetPicker config={config} onChange={setImageModelTargets} fullWidth onMissingConfig={() => openConfigDialog(false)} />
+                <ImageModelTargetPicker config={config} onChange={onModelTargetsChange} fullWidth onMissingConfig={() => openConfigDialog(false)} />
             </label>
             <div className="col-span-2">
-                <ImageSettingsPanel config={config} onConfigChange={(key, value) => updateConfig(key, value)} theme={theme} showTitle={false} className="space-y-4" maxCount={10} />
+                <ImageSettingsPanel config={{ ...config, quality, size, count }} onConfigChange={(key, value) => {
+                    if (key === "quality") onQualityChange(value);
+                    else if (key === "size") onSizeChange(value);
+                    else if (key === "count") onCountChange(value);
+                }} theme={theme} showTitle={false} className="space-y-4" maxCount={10} />
             </div>
         </>
     );
