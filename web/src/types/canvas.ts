@@ -27,6 +27,7 @@ export type CanvasImageGenerationType = "generation" | "edit";
 
 export type CanvasNodeImage = {
     id: string;
+    model?: string;
     status: CanvasNodeStatus;
     errorDetails?: string;
     content: string;
@@ -54,6 +55,7 @@ export type CanvasNodeMetadata = {
     generationMode?: CanvasGenerationMode;
     generationType?: CanvasImageGenerationType;
     model?: string;
+    imageModelTargets?: string[];
     reasoningEffort?: "auto" | "low" | "medium" | "high" | "xhigh";
     size?: string;
     quality?: string;

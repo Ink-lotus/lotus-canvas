@@ -6,16 +6,16 @@ import { saveAs } from "file-saver";
 import { useTranslation } from "react-i18next";
 
 import { ImageSettingsPanel } from "@/components/image-settings-panel";
-import { ModelPicker } from "@/components/model-picker";
+import { ImageModelTargetPicker } from "@/components/image-model-target-picker";
 import { PromptSelectDialog } from "@/components/prompts/prompt-select-dialog";
 import { AssetPickerModal, type InsertAssetPayload } from "@/components/canvas/asset-picker-modal";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { imageReferenceLabel } from "@/lib/image-reference-prompt";
-import { modelOptionLabel, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
+import { modelOptionLabel, modelOptionChannelName, resolveImageModelTargets, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { nanoid } from "nanoid";
 import { formatBytes, formatDuration } from "@/lib/image-utils";
-import { requestEdit, requestGeneration } from "@/services/api/image";
+import { requestImageBatch, type GeneratedImageResult } from "@/services/api/image";
 import { deleteStoredImages, resolveImageUrl, uploadImage } from "@/services/image-storage";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { useWorkbenchAgentStore } from "@/stores/use-workbench-agent-store";
@@ -24,6 +24,7 @@ import i18n from "@/i18n";
 
 type GeneratedImage = {
     id: string;
+    model?: string;
     dataUrl: string;
     storageKey?: string;
     durationMs: number;
@@ -38,6 +39,7 @@ type GenerationResult = {
     status: "pending" | "success" | "failed";
     image?: GeneratedImage;
     error?: string;
+    source?: GeneratedImageResult;
 };
 
 type GenerationLog = {
@@ -60,9 +62,7 @@ type GenerationLog = {
     thumbnails: string[];
 };
 
-type GenerationLogConfig = Pick<AiConfig, "model" | "imageModel" | "quality" | "size" | "count">;
-
-type UpdateAiConfig = <K extends keyof AiConfig>(key: K, value: AiConfig[K]) => void;
+type GenerationLogConfig = Pick<AiConfig, "model" | "imageModel" | "imageModelTargets" | "quality" | "size" | "count">;
 
 const LOG_STORE_KEY = "infinite-canvas:image_generation_logs";
 const RESULT_ACTION_BUTTON_CLASS = "min-w-0 px-1.5 [&_.ant-btn-icon]:shrink-0 [&>span:last-child]:min-w-0 [&>span:last-child]:truncate";
@@ -76,6 +76,7 @@ export default function ImagePage() {
     const config = useConfigStore((state) => state.config);
     const effectiveConfig = useEffectiveConfig();
     const updateConfig = useConfigStore((state) => state.updateConfig);
+    const setImageModelTargets = useConfigStore((state) => state.setImageModelTargets);
     const isAiConfigReady = useConfigStore((state) => state.isAiConfigReady);
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const addAsset = useAssetStore((state) => state.addAsset);
@@ -100,8 +101,11 @@ export default function ImagePage() {
     const updateAgentTask = useWorkbenchAgentStore((state) => state.updateTask);
     const processedCommandRef = useRef(0);
     const agentTaskIdRef = useRef<string | undefined>(undefined);
+    const generationController = useRef<AbortController | null>(null);
+    const retryControllers = useRef(new Map<string, AbortController>());
 
-    const model = effectiveConfig.imageModel || effectiveConfig.model;
+    const modelTargets = resolveImageModelTargets(effectiveConfig);
+    const model = modelTargets[0] || effectiveConfig.imageModel || effectiveConfig.model;
     const canGenerate = Boolean(prompt.trim());
     const generationCount = Math.max(1, Math.min(10, Number(config.count) || 1));
 
@@ -113,6 +117,12 @@ export default function ImagePage() {
 
     useEffect(() => {
         void refreshLogs();
+        return () => {
+            generationController.current?.abort();
+            generationController.current = null;
+            retryControllers.current.forEach((controller) => controller.abort());
+            retryControllers.current.clear();
+        };
     }, []);
 
     const addReferences = async (files?: FileList | null) => {
@@ -148,6 +158,7 @@ export default function ImagePage() {
     };
 
     const generate = async () => {
+        if (generationController.current) return;
         const agentTaskId = agentTaskIdRef.current;
         agentTaskIdRef.current = undefined;
         const text = prompt.trim();
@@ -169,17 +180,24 @@ export default function ImagePage() {
             return;
         }
 
+        retryControllers.current.forEach((controller) => controller.abort());
+        retryControllers.current.clear();
         setElapsedMs(0);
+        const controller = new AbortController();
+        generationController.current = controller;
         setRunning(true);
         if (agentTaskId) updateAgentTask(agentTaskId, { status: "running", error: undefined });
         setPreviewLog(null);
-        setResults(Array.from({ length: generationCount }, () => ({ id: nanoid(), status: "pending" })));
+        const slots: GenerationResult[] = Array.from({ length: generationCount }, () => ({ id: nanoid(), status: "pending" }));
+        setResults(slots);
         const batchStartedAt = performance.now();
         setStartedAt(batchStartedAt);
 
-        const tasks = Array.from({ length: generationCount }, (_, index) => runGenerationSlot(index, snapshot));
+        const tasks = requestImageBatch({ ...snapshot.config, count: String(generationCount) }, snapshot.text, snapshot.references, { signal: controller.signal }).map((task, index) => runGenerationSlot(slots[index].id, task, controller.signal));
 
         const result = await Promise.allSettled(tasks);
+        if (generationController.current !== controller) return;
+        if (controller.signal.aborted) setResults((value) => value.map((item) => item.status === "pending" ? { ...item, status: "failed", error: t("common.requestCanceled") } : item));
         const successImages = result.filter((item): item is PromiseFulfilledResult<GeneratedImage> => item.status === "fulfilled").map((item) => item.value);
         const successCount = successImages.length;
         const failCount = generationCount - successCount;
@@ -201,8 +219,9 @@ export default function ImagePage() {
                     images: successImages,
                 }),
             );
-            successCount ? message.success(t("imageWorkbench.generated")) : message.error(failed?.reason instanceof Error ? failed.reason.message : t("workbench.generationFailed"));
+            if (!controller.signal.aborted) successCount ? message.success(t("imageWorkbench.generated")) : message.error(failed?.reason instanceof Error ? failed.reason.message : t("workbench.generationFailed"));
         } finally {
+            generationController.current = null;
             setRunning(false);
         }
     };
@@ -266,6 +285,11 @@ export default function ImagePage() {
     };
 
     const createSession = () => {
+        generationController.current?.abort();
+        generationController.current = null;
+        retryControllers.current.forEach((controller) => controller.abort());
+        retryControllers.current.clear();
+        setRunning(false);
         setPrompt("");
         setReferences([]);
         setResults([]);
@@ -293,11 +317,12 @@ export default function ImagePage() {
     const refreshLogs = async () => setLogs(await readStoredLogs());
 
     const previewGenerationLog = async (log: GenerationLog) => {
+        createSession();
         setPreviewLog(log);
         setLogsOpen(false);
         setPrompt(log.prompt);
         setReferences(log.references || []);
-        if (log.config.imageModel || log.model) updateConfig("imageModel", log.config.imageModel || log.model);
+        setImageModelTargets(log.config.imageModelTargets || [log.config.model || log.model]);
         if (log.config.quality) updateConfig("quality", log.config.quality);
         if (log.config.size) updateConfig("size", log.config.size);
         if (log.config.count) updateConfig("count", log.config.count);
@@ -310,42 +335,50 @@ export default function ImagePage() {
             message.error(t("imageWorkbench.promptRequired"));
             return null;
         }
-        if (!isAiConfigReady(effectiveConfig, model)) {
+        if (!modelTargets.length || modelTargets.some((target) => !isAiConfigReady(effectiveConfig, target))) {
             message.warning(t("workbench.configFirst"));
             openConfigDialog(true);
             return null;
         }
-        return { text, config: { ...effectiveConfig, model, count: "1" }, references: [...references] };
+        return { text, config: { ...effectiveConfig, model, imageModelTargets: modelTargets, count: "1" }, references: [...references] };
     };
 
-    const runGenerationSlot = async (index: number, snapshot: { text: string; config: AiConfig; references: ReferenceImage[] }) => {
+    const runGenerationSlot = async (id: string, task: Promise<GeneratedImageResult>, signal: AbortSignal) => {
         const itemStartedAt = performance.now();
+        let image: GeneratedImageResult | undefined;
         try {
-            const result = snapshot.references.length ? await requestEdit(snapshot.config, snapshot.text, snapshot.references) : await requestGeneration(snapshot.config, snapshot.text);
-            const image = result[0];
-            if (!image) throw new Error(t("imageWorkbench.missingResult"));
-            const stored = await uploadImage(image.dataUrl);
-            const nextImage: GeneratedImage = { id: image.id, dataUrl: stored.url, ...(stored.storageKey ? { storageKey: stored.storageKey } : {}), durationMs: performance.now() - itemStartedAt, width: stored.width, height: stored.height, bytes: stored.bytes, mimeType: stored.mimeType };
-            setResults((value) => updateResultAt(value, index, { status: "success", image: nextImage }));
+            image = await task;
+            signal.throwIfAborted();
+            const stored = await uploadImage(image.dataUrl, { signal });
+            signal.throwIfAborted();
+            const nextImage: GeneratedImage = { id: image.id, model: image.model, dataUrl: stored.url, ...(stored.storageKey ? { storageKey: stored.storageKey } : {}), durationMs: performance.now() - itemStartedAt, width: stored.width, height: stored.height, bytes: stored.bytes, mimeType: stored.mimeType };
+            setResults((value) => value.map((item) => item.id === id ? { ...item, status: "success", image: nextImage, source: undefined, error: undefined } : item));
             return nextImage;
         } catch (error) {
-            setResults((value) => updateResultAt(value, index, { status: "failed", error: error instanceof Error ? error.message : t("workbench.generationFailed") }));
+            if (!signal.aborted || generationController.current?.signal === signal) setResults((value) => value.map((item) => item.id === id ? { ...item, status: "failed", source: image, error: signal.aborted ? t("common.requestCanceled") : error instanceof Error ? error.message : t("workbench.generationFailed") } : item));
             throw error;
         }
     };
 
     const retryResult = async (index: number) => {
-        const snapshot = buildRequestSnapshot();
+        const result = results[index];
+        if (result?.status !== "failed" || retryControllers.current.has(result.id) || generationController.current) return;
+        const source = result.source;
+        const snapshot = source ? { text: prompt, config: { ...effectiveConfig, model: source.model, imageModelTargets: [source.model], count: "1" }, references } : buildRequestSnapshot();
         if (!snapshot) return;
+        const controller = new AbortController();
+        retryControllers.current.set(result.id, controller);
         setPreviewLog(null);
         setResults((value) => updateResultAt(value, index, { status: "pending", error: undefined, image: undefined }));
         const retryStartedAt = performance.now();
         try {
-            const image = await runGenerationSlot(index, snapshot);
+            const task = source ? Promise.resolve(source) : requestImageBatch(snapshot.config, snapshot.text, snapshot.references, { signal: controller.signal })[0];
+            const image = await runGenerationSlot(result.id, task, controller.signal);
+            controller.signal.throwIfAborted();
             saveLog(
                 buildLog({
                     prompt: snapshot.text,
-                    model,
+                    model: image.model || snapshot.config.model,
                     config: { ...snapshot.config, count: "1" },
                     references: snapshot.references,
                     durationMs: performance.now() - retryStartedAt,
@@ -358,6 +391,8 @@ export default function ImagePage() {
             message.success(t("workbench.retrySuccess"));
         } catch {
             // runGenerationSlot has already marked the result as failed.
+        } finally {
+            retryControllers.current.delete(result.id);
         }
     };
 
@@ -479,13 +514,13 @@ export default function ImagePage() {
                             </div>
 
                             <div className="hidden gap-4 sm:grid sm:grid-cols-2">
-                                <GenerationSettings config={effectiveConfig} model={model} updateConfig={updateConfig} openConfigDialog={openConfigDialog} />
+                                <GenerationSettings />
                             </div>
                         </div>
 
                         <div className="mt-auto pt-6">
-                            <Button type="primary" size="large" block icon={<Sparkles className="size-4" />} loading={running} disabled={!canGenerate || running} onClick={() => void generate()}>
-                                {t("workbench.generate")}
+                            <Button type="primary" size="large" block danger={running} icon={running ? <LoaderCircle className="size-4 animate-spin" /> : <Sparkles className="size-4" />} disabled={!running && !canGenerate} onClick={() => running ? generationController.current?.abort() : void generate()}>
+                                {t(running ? "imageGeneration.stop" : "workbench.generate")}
                             </Button>
                         </div>
                     </div>
@@ -542,7 +577,7 @@ export default function ImagePage() {
             </Drawer>
             <Drawer title={t("workbench.settings")} placement="bottom" size="82vh" open={settingsOpen} onClose={() => setSettingsOpen(false)}>
                 <div className="grid grid-cols-2 gap-3 pb-4">
-                    <GenerationSettings config={effectiveConfig} model={model} updateConfig={updateConfig} openConfigDialog={openConfigDialog} />
+                    <GenerationSettings />
                 </div>
             </Drawer>
             <PromptSelectDialog open={promptDialogOpen} onOpenChange={setPromptDialogOpen} onSelect={setPrompt} />
@@ -554,7 +589,11 @@ export default function ImagePage() {
     );
 }
 
-function GenerationSettings({ config, model, updateConfig, openConfigDialog }: { config: AiConfig; model: string; updateConfig: UpdateAiConfig; openConfigDialog: (shouldPromptContinue?: boolean) => void }) {
+function GenerationSettings() {
+    const config = useEffectiveConfig();
+    const updateConfig = useConfigStore((state) => state.updateConfig);
+    const setImageModelTargets = useConfigStore((state) => state.setImageModelTargets);
+    const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const { t } = useTranslation();
 
@@ -562,7 +601,7 @@ function GenerationSettings({ config, model, updateConfig, openConfigDialog }: {
         <>
             <label className="col-span-2 block min-w-0 sm:col-span-1">
                 <span className="mb-1.5 block text-sm font-semibold sm:mb-2 sm:text-base">{t("workbench.model")}</span>
-                <ModelPicker config={config} value={model} onChange={(value) => updateConfig("imageModel", value)} capability="image" fullWidth onMissingConfig={() => openConfigDialog(false)} />
+                <ImageModelTargetPicker config={config} onChange={setImageModelTargets} fullWidth onMissingConfig={() => openConfigDialog(false)} />
             </label>
             <div className="col-span-2">
                 <ImageSettingsPanel config={config} onConfigChange={(key, value) => updateConfig(key, value)} theme={theme} showTitle={false} className="space-y-4" maxCount={10} />
@@ -585,6 +624,7 @@ function ResultImageCard({
     onSaveAsset: (image: GeneratedImage, index: number) => void;
 }) {
     const { t } = useTranslation();
+    const config = useEffectiveConfig();
     return (
         <div className="overflow-hidden rounded-lg border border-stone-200 bg-background dark:border-stone-800">
             <Image src={image.dataUrl} alt={t("imageWorkbench.resultAlt", { count: index + 1 })} className="aspect-square object-cover" />
@@ -595,6 +635,7 @@ function ResultImageCard({
                     </span>
                     <span>{formatBytes(image.bytes)}</span>
                     <span>{formatDuration(image.durationMs)}</span>
+                    {image.model && <span className="ml-auto min-w-0 truncate" title={modelOptionLabel(config, image.model)}>{modelOptionChannelName(config, image.model)}</span>}
                 </div>
                 <div className="grid min-w-0 grid-cols-3 gap-2">
                     <Tooltip title={t("common.addToAssets")}>
@@ -829,6 +870,7 @@ function normalizeLogConfig(log: Partial<GenerationLog>): GenerationLogConfig {
     return {
         model: log.config?.model || log.model || "",
         imageModel: log.config?.imageModel || log.model || "",
+        imageModelTargets: log.config?.imageModelTargets,
         quality: log.config?.quality || log.quality || "",
         size: log.config?.size || log.size || "",
         count: log.config?.count || String(log.imageCount || log.successCount || 1),
@@ -877,6 +919,7 @@ function buildLog({
     const logConfig = {
         model: config.model,
         imageModel: config.imageModel,
+        imageModelTargets: config.imageModelTargets,
         quality: config.quality,
         size: config.size,
         count: config.count,

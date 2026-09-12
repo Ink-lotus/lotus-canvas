@@ -4,7 +4,8 @@ import { Button, Modal, Tooltip } from "antd";
 import { useTranslation } from "react-i18next";
 
 import { ModelPicker } from "@/components/model-picker";
-import { defaultConfig, resolveModelForCapability, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
+import { ImageModelTargetPicker } from "@/components/image-model-target-picker";
+import { defaultConfig, resolveImageModelTargets, resolveModelForCapability, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { CanvasImageSettingsPopover } from "./canvas-image-settings-popover";
@@ -98,7 +99,7 @@ export function CanvasNodePromptPanel({ node, nodes, isRunning, onPromptChange, 
                     <CanvasPromptLibrary onSelect={updatePrompt} />
                     {mode === "image" ? (
                         <>
-                            <ModelPicker config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability="image" onMissingConfig={() => openConfigDialog(true)} className="max-w-[190px]" />
+                            <ImageModelTargetPicker config={config} onChange={(targets) => onConfigChange(node.id, { model: targets[0], imageModelTargets: targets })} onMissingConfig={() => openConfigDialog(true)} className="max-w-[220px]" />
                             <CanvasImageSettingsPopover
                                 config={config}
                                 placement="topLeft"
@@ -168,9 +169,11 @@ function defaultMode(type: CanvasNodeData["type"]): CanvasNodeGenerationMode {
 }
 
 function buildNodeConfig(globalConfig: AiConfig, node: CanvasNodeData, mode: CanvasNodeGenerationMode): AiConfig {
+    const imageModelTargets = resolveImageModelTargets(globalConfig, node.metadata);
     return {
         ...globalConfig,
-        model: resolveModelForCapability(globalConfig, node.metadata?.model, mode),
+        model: mode === "image" ? imageModelTargets[0] || "" : resolveModelForCapability(globalConfig, node.metadata?.model, mode),
+        imageModelTargets,
         reasoningEffort: node.metadata?.reasoningEffort || globalConfig.reasoningEffort || defaultConfig.reasoningEffort,
         quality: node.metadata?.quality || globalConfig.quality || defaultConfig.quality,
         size: node.metadata?.size || globalConfig.size || defaultConfig.size,

@@ -11,6 +11,7 @@ export type ReasoningEffort = "auto" | "low" | "medium" | "high" | "xhigh";
 
 export type ChannelModel = {
     name: string;
+    alias?: string;
     capability: ModelCapability;
     script?: string;
 };
@@ -21,6 +22,7 @@ export type ModelChannel = {
     baseUrl: string;
     apiKey: string;
     apiFormat: ApiCallFormat;
+    maxConcurrency?: number;
     models: ChannelModel[];
 };
 
@@ -32,6 +34,7 @@ export type AiConfig = {
     channels: ModelChannel[];
     model: string;
     imageModel: string;
+    imageModelTargets?: string[];
     videoModel: string;
     textModel: string;
     audioModel: string;
@@ -138,6 +141,8 @@ type ConfigStore = {
     configTab: ConfigTabKey;
     shouldPromptContinue: boolean;
     updateConfig: <K extends keyof AiConfig>(key: K, value: AiConfig[K]) => void;
+    setImageModelTargets: (targets: string[]) => void;
+    setChannels: (channels: ModelChannel[]) => void;
     importChannelCredentials: (input: { baseUrl?: string | null; apiKey?: string | null }) => ChannelCredentialsImportResult;
     updateWebdavConfig: <K extends keyof WebdavSyncConfig>(key: K, value: WebdavSyncConfig[K]) => void;
     isAiConfigReady: (config: AiConfig, model: string) => boolean;
@@ -212,12 +217,32 @@ export const useConfigStore = create<ConfigStore>()(
             configTab: "channels",
             shouldPromptContinue: false,
             updateConfig: (key, value) =>
-                set((state) => ({
-                    config: {
-                        ...state.config,
-                        [key]: value,
-                    },
-                })),
+                set((state) => {
+                    const config = { ...state.config, [key]: value };
+                    if (key === "imageModel") {
+                        const targets = resolveImageModelTargets(state.config).filter((target) => modelOptionAlias(config, target) === modelOptionAlias(config, config.imageModel));
+                        const nextTargets = targets.length || state.config.imageModelTargets?.length === 0 ? targets : undefined;
+                        config.imageModelTargets = normalizeImageModelTargets(config.imageModel, nextTargets, config.channels);
+                    }
+                    return { config };
+                }),
+            setImageModelTargets: (targets) =>
+                set((state) => ({ config: { ...state.config, imageModelTargets: normalizeImageModelTargets(state.config.imageModel, targets, state.config.channels) } })),
+            setChannels: (channels) =>
+                set((state) => {
+                    const normalized = channels.map(createModelChannel);
+                    const config = { ...state.config, channels: normalized, models: modelOptionsFromChannels(normalized), baseUrl: normalized[0]?.baseUrl || state.config.baseUrl, apiKey: normalized[0]?.apiKey || state.config.apiKey, apiFormat: normalized[0]?.apiFormat || state.config.apiFormat };
+                    for (const capability of ["image", "video", "text", "audio"] as const) {
+                        const key = `${capability}Model` as const;
+                        const options = selectableModelsByCapability(config, capability);
+                        const current = normalizeModelOptionValue(config[key], normalized);
+                        config[key] = options.includes(current) ? current : options[0] || "";
+                    }
+                    const targets = resolveImageModelTargets(config);
+                    const nextTargets = targets.length || state.config.imageModelTargets?.length === 0 ? targets : undefined;
+                    config.imageModelTargets = normalizeImageModelTargets(config.imageModel, nextTargets, config.channels);
+                    return { config };
+                }),
             importChannelCredentials: (input) => {
                 const currentConfig = get().config;
                 const result = upsertChannelCredentials(currentConfig, input);
@@ -247,6 +272,7 @@ export const useConfigStore = create<ConfigStore>()(
                 if (!Array.isArray(persistedConfig.channels)) config.channels = [];
                 const channels = normalizeChannels(config);
                 const models = modelOptionsFromChannels(channels);
+                const imageModel = normalizeModelOptionValue(config.imageModel || config.model, channels);
                 return {
                     ...current,
                     webdav: { ...defaultWebdavSyncConfig, ...persistedWebdav },
@@ -256,7 +282,8 @@ export const useConfigStore = create<ConfigStore>()(
                         apiFormat: normalizeApiFormat(config.apiFormat),
                         channels,
                         models,
-                        imageModel: normalizeModelOptionValue(config.imageModel || config.model, channels),
+                        imageModel,
+                        imageModelTargets: normalizeImageModelTargets(imageModel, config.imageModelTargets, channels),
                         videoModel: normalizeModelOptionValue(config.videoModel, channels),
                         textModel: normalizeModelOptionValue(config.textModel || config.model, channels),
                         audioModel: normalizeModelOptionValue(config.audioModel || defaultConfig.audioModel, channels),
@@ -295,7 +322,8 @@ export function normalizeChannelModels(models: Array<string | ChannelModel> | un
         seen.add(name);
         const capability = typeof item === "string" ? guessCapability(name) : item.capability || guessCapability(name);
         const script = typeof item === "string" ? undefined : item.script?.trim() || undefined;
-        result.push({ name, capability, script });
+        const alias = typeof item === "string" ? undefined : item.alias?.trim() || undefined;
+        result.push({ name, capability, script, alias });
     }
     return result;
 }
@@ -308,6 +336,7 @@ export function createModelChannel(channel?: Partial<ModelChannel>): ModelChanne
         baseUrl: channel?.baseUrl?.trim() || defaultBaseUrlForApiFormat(apiFormat),
         apiKey: channel?.apiKey || "",
         apiFormat,
+        maxConcurrency: normalizeChannelConcurrency(channel?.maxConcurrency),
         models: normalizeChannelModels(channel?.models),
     };
 }
@@ -394,11 +423,40 @@ export function modelOptionName(value: string) {
     return decodeChannelModel(value)?.model || value;
 }
 
+export function modelOptionAlias(config: AiConfig, value: string) {
+    return findChannelModel(config, value)?.model.alias?.trim() || modelOptionName(value);
+}
+
+export function modelOptionChannelName(config: AiConfig, value: string) {
+    const channelId = decodeChannelModel(value)?.channelId;
+    return config.channels.find((channel) => channel.id === channelId)?.name || channelId || "";
+}
+
 export function modelOptionLabel(config: AiConfig, value: string) {
     const decoded = decodeChannelModel(value);
     if (!decoded) return value;
     const channel = config.channels.find((item) => item.id === decoded.channelId);
-    return channel ? `${decoded.model}（${channel.name}）` : decoded.model;
+    const alias = modelOptionAlias(config, value);
+    const name = alias === decoded.model ? decoded.model : `${alias} · ${decoded.model}`;
+    return channel ? `${name}（${channel.name}）` : name;
+}
+
+export function normalizeImageModelTargets(primary: string, targets: string[] | undefined, channels: ModelChannel[]) {
+    const config = { channels } as AiConfig;
+    const selected = Array.from(new Set((targets ?? [primary]).map((target) => normalizeModelOptionValue(target, channels)).filter((target) => modelMatchesCapability(config, target, "image"))));
+    const alias = modelOptionAlias(config, selected[0] || "");
+    return selected.filter((target) => modelOptionAlias(config, target) === alias);
+}
+
+export function resolveImageModelTargets(config: AiConfig, selection?: { model?: string; imageModelTargets?: string[] }) {
+    const capability = selection?.model ? modelCapabilityOf(config, selection.model) : undefined;
+    const explicitImageModel = selection?.model && (!capability || capability === "image") ? selection.model : undefined;
+    const targets = selection?.imageModelTargets ?? (explicitImageModel ? [explicitImageModel] : config.imageModelTargets);
+    return normalizeImageModelTargets(config.imageModel || config.model, targets, config.channels);
+}
+
+export function normalizeChannelConcurrency(value: unknown) {
+    return Math.max(1, Math.min(20, Math.floor(Number(value) || 1)));
 }
 
 export function modelOptionsFromChannels(channels: ModelChannel[]) {

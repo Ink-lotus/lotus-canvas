@@ -14,7 +14,7 @@ import { exportAppConfig, importAppConfig } from "@/services/config-file";
 import { syncAppDataToWebdav, type AppSyncDomainKey, type AppSyncProgressEvent } from "@/services/app-sync";
 import { testWebdavConnection, WEBDAV_MANIFEST_FILE_NAME } from "@/services/webdav-sync";
 import { audioFormatOptions, audioVoiceOptions, normalizeAudioSpeedValue } from "@/lib/audio-generation";
-import { createModelChannel, modelOptionsFromChannels, normalizeModelOptionValue, selectableModelsByCapability, useConfigStore, type AiConfig, type ApiCallFormat, type ConfigTabKey, type ModelCapability, type ModelChannel } from "@/stores/use-config-store";
+import { createModelChannel, useConfigStore, type ApiCallFormat, type ConfigTabKey, type ModelCapability, type ModelChannel } from "@/stores/use-config-store";
 
 type ModelGroup = {
     capability: ModelCapability;
@@ -60,6 +60,7 @@ export function AppConfigPanel({ showDoneButton = false, initialTab = "channels"
     const config = useConfigStore((state) => state.config);
     const webdav = useConfigStore((state) => state.webdav);
     const updateConfig = useConfigStore((state) => state.updateConfig);
+    const updateChannels = useConfigStore((state) => state.setChannels);
     const updateWebdavConfig = useConfigStore((state) => state.updateWebdavConfig);
     const shouldPromptContinue = useConfigStore((state) => state.shouldPromptContinue);
     const setConfigDialogOpen = useConfigStore((state) => state.setConfigDialogOpen);
@@ -68,10 +69,6 @@ export function AppConfigPanel({ showDoneButton = false, initialTab = "channels"
     const editingChannel = config.channels.find((channel) => channel.id === editingChannelId) || null;
     const locale = i18n.resolvedLanguage as AppLocale;
     useEffect(() => setActiveTab(initialTab), [initialTab]);
-
-    const saveConfig = (nextConfig: AiConfig) => {
-        (Object.keys(nextConfig) as Array<keyof AiConfig>).forEach((key) => updateConfig(key, nextConfig[key]));
-    };
 
     const finishConfig = () => {
         const ready = config.channels.some((channel) => channel.baseUrl.trim() && channel.apiKey.trim() && channel.models.length);
@@ -91,8 +88,6 @@ export function AppConfigPanel({ showDoneButton = false, initialTab = "channels"
             if (configInputRef.current) configInputRef.current.value = "";
         }
     };
-
-    const updateChannels = (channels: ModelChannel[]) => saveConfig(withChannels(config, channels));
 
     const addChannel = () => {
         const channel = createModelChannel({ name: t("config.channels.numberedName", { count: config.channels.length + 1 }) });
@@ -360,30 +355,6 @@ export function AppConfigModal() {
             <AppConfigPanel showDoneButton initialTab={configTab} />
         </Modal>
     );
-}
-
-function withChannels(config: AiConfig, channels: ModelChannel[]): AiConfig {
-    const next: AiConfig = {
-        ...config,
-        channels,
-        models: modelOptionsFromChannels(channels),
-        baseUrl: channels[0]?.baseUrl || config.baseUrl,
-        apiKey: channels[0]?.apiKey || config.apiKey,
-        apiFormat: channels[0]?.apiFormat || config.apiFormat,
-    };
-    return {
-        ...next,
-        imageModel: pickDefaultModel(next, "image", config.imageModel),
-        videoModel: pickDefaultModel(next, "video", config.videoModel),
-        textModel: pickDefaultModel(next, "text", config.textModel),
-        audioModel: pickDefaultModel(next, "audio", config.audioModel),
-    };
-}
-
-function pickDefaultModel(config: AiConfig, capability: ModelCapability, current: string) {
-    const options = selectableModelsByCapability(config, capability);
-    const normalized = normalizeModelOptionValue(current, config.channels);
-    return options.includes(normalized) ? normalized : options[0] || "";
 }
 
 function normalizeImageCount(value: string) {
