@@ -217,15 +217,12 @@ export const useConfigStore = create<ConfigStore>()(
             configTab: "channels",
             shouldPromptContinue: false,
             updateConfig: (key, value) =>
-                set((state) => {
-                    const config = { ...state.config, [key]: value };
-                    if (key === "imageModel") {
-                        const targets = resolveImageModelTargets(state.config).filter((target) => modelOptionAlias(config, target) === modelOptionAlias(config, config.imageModel));
-                        const nextTargets = targets.length || state.config.imageModelTargets?.length === 0 ? targets : undefined;
-                        config.imageModelTargets = normalizeImageModelTargets(config.imageModel, nextTargets, config.channels);
-                    }
-                    return { config };
-                }),
+                set((state) => ({
+                    config: {
+                        ...state.config,
+                        [key]: value,
+                    },
+                })),
             setImageModelTargets: (targets) =>
                 set((state) => ({ config: { ...state.config, imageModelTargets: normalizeImageModelTargets(state.config.imageModel, targets, state.config.channels) } })),
             setChannels: (channels) =>

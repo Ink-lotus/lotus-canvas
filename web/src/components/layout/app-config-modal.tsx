@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { ModelPicker } from "@/components/model-picker";
+import { ImageModelTargetPicker } from "@/components/image-model-target-picker";
 import { ChannelEditorDrawer } from "@/components/layout/channel-editor-drawer";
 import { ConfigLocalProxy } from "@/components/layout/config-local-proxy";
 import { ConfigPromptSources } from "@/components/layout/config-prompt-sources";
@@ -30,7 +31,6 @@ type WebdavDomainProgress = {
 };
 
 const modelGroups: ModelGroup[] = [
-    { capability: "image", modelKey: "imageModel", labelKey: "config.preferences.defaultImageModel" },
     { capability: "video", modelKey: "videoModel", labelKey: "config.preferences.defaultVideoModel" },
     { capability: "text", modelKey: "textModel", labelKey: "config.preferences.defaultTextModel" },
     { capability: "audio", modelKey: "audioModel", labelKey: "config.preferences.defaultAudioModel" },
@@ -60,6 +60,7 @@ export function AppConfigPanel({ showDoneButton = false, initialTab = "channels"
     const config = useConfigStore((state) => state.config);
     const webdav = useConfigStore((state) => state.webdav);
     const updateConfig = useConfigStore((state) => state.updateConfig);
+    const setImageModelTargets = useConfigStore((state) => state.setImageModelTargets);
     const updateChannels = useConfigStore((state) => state.setChannels);
     const updateWebdavConfig = useConfigStore((state) => state.updateWebdavConfig);
     const shouldPromptContinue = useConfigStore((state) => state.shouldPromptContinue);
@@ -219,6 +220,18 @@ export function AppConfigPanel({ showDoneButton = false, initialTab = "channels"
                             <Form layout="vertical" requiredMark={false}>
                                 <div className="mb-2 text-sm font-semibold">{t("config.preferences.defaultModels")}</div>
                                 <div className="mb-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                                    <Form.Item label={t("config.preferences.defaultImageModel")} className="mb-0">
+                                        <ImageModelTargetPicker
+                                            config={config}
+                                            onChange={(targets) => {
+                                                if (targets.length > 0) {
+                                                    updateConfig("imageModel", targets[0]);
+                                                    setImageModelTargets(targets);
+                                                }
+                                            }}
+                                            fullWidth
+                                        />
+                                    </Form.Item>
                                     {modelGroups.map((group) => (
                                         <Form.Item key={group.modelKey} label={t(group.labelKey)} className="mb-0">
                                             <ModelPicker config={config} value={config[group.modelKey]} onChange={(model) => updateConfig(group.modelKey, model)} capability={group.capability} fullWidth />
