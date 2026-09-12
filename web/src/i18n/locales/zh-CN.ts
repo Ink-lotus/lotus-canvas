@@ -161,6 +161,15 @@ export default {
         generationFailed: "生成失败",
         retrySuccess: "重试成功",
     },
+    imageGeneration: {
+        alias: "统一模型名（可选）",
+        maxConcurrency: "图片并发上限（当前标签页）",
+        concurrency: "并发 {{count}}",
+        selection: "{{model}} · {{count}} 个渠道",
+        noChannel: "请检查已选图片渠道的模型、Base URL 和 API Key",
+        provider: "生成渠道",
+        stop: "停止生成",
+    },
     imageWorkbench: {
         title: "生图工作台",
         promptPlaceholder: "描述画面主体、风格、构图、光线和用途",

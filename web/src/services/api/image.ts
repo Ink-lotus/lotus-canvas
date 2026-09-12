@@ -1,7 +1,8 @@
 import axios from "axios";
 
 import i18n from "@/i18n";
-import { buildApiUrl, resolveModelRequestConfig, resolveModelScript, withLocalProxy, type AiConfig, type ModelChannel } from "@/stores/use-config-store";
+import { buildApiUrl, decodeChannelModel, normalizeChannelConcurrency, resolveImageModelTargets, resolveModelRequestConfig, resolveModelScript, withLocalProxy, type AiConfig, type ModelChannel } from "@/stores/use-config-store";
+import { imageGenerationScheduler } from "./image-generation-scheduler";
 import { normalizePluginImages, runModelPlugin } from "./model-plugin";
 import { nanoid } from "nanoid";
 import { dataUrlToFile } from "@/lib/image-utils";
@@ -683,11 +684,6 @@ function parseGeminiToolResponse(payload: GeminiPayload): ToolResponseResult {
     return { content, toolCalls };
 }
 
-async function requestGeminiImages(config: AiConfig, prompt: string, references: ReferenceImage[], count: number, options?: RequestOptions) {
-    const requests = Array.from({ length: count }, () => requestGeminiImagesOnce(config, prompt, references, options));
-    return (await Promise.all(requests)).flat();
-}
-
 async function requestGeminiImagesOnce(config: AiConfig, prompt: string, references: ReferenceImage[], options?: RequestOptions) {
     const parts: GeminiPart[] = [{ text: prompt }];
     for (const image of references) {
@@ -720,7 +716,88 @@ function parseGeminiImagePayload(payload: GeminiPayload) {
     return images;
 }
 
-export async function requestGeneration(config: AiConfig, prompt: string, options?: RequestOptions) {
+export type GeneratedImageResult = { id: string; dataUrl: string; model: string };
+
+class ImageGenerationError extends Error {
+    constructor(message: string, readonly canFallback: boolean) {
+        super(message);
+        this.name = "ImageGenerationError";
+    }
+}
+
+function imageRequestError(error: unknown, options?: RequestOptions, builtIn = true) {
+    options?.signal?.throwIfAborted();
+    if (axios.isCancel(error)) return new DOMException("Aborted", "AbortError");
+    if (error instanceof Error && error.name === "AbortError") return error;
+    // Only explicit submission refusals are eligible. Network/5xx errors may have already incurred a charge.
+    const canFallback = builtIn && axios.isAxiosError(error) && [401, 403, 404, 429].includes(error.response?.status || 0);
+    return new ImageGenerationError(readAxiosError(error, apiText("requestFailed")), canFallback);
+}
+
+export function requestImageBatch(config: AiConfig, prompt: string, references: ReferenceImage[] = [], options?: RequestOptions): Promise<GeneratedImageResult>[] {
+    const count = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
+    const selected = resolveImageModelTargets(config, { model: config.model, imageModelTargets: config.imageModelTargets });
+    const targets = selected.map((value) => {
+        const channel = config.channels.find((item) => item.id === decodeChannelModel(value)?.channelId)!;
+        return { value, channelId: channel.id, concurrency: normalizeChannelConcurrency(channel.maxConcurrency) };
+    });
+    const prepared = (async () => {
+        options?.signal?.throwIfAborted();
+        if (!targets.length || selected.some((value) => {
+            const channel = resolveModelRequestConfig(config, value);
+            return !channel.baseUrl.trim() || !channel.apiKey.trim();
+        })) throw new Error(i18n.t("imageGeneration.noChannel"));
+        return Promise.all(references.map(async (image) => {
+            const dataUrl = await imageToDataUrl(image, options);
+            if (!dataUrl) throw new Error(i18n.t("common.imageReadFailed"));
+            return { ...image, dataUrl };
+        }));
+    })();
+
+    return Array.from({ length: count }, async (_, index) => {
+        const refs = await prepared;
+        let remaining = targets;
+        let preferred = index === 0 ? config.imageModel : undefined;
+        while (remaining.length) {
+            let attempted = "";
+            try {
+                return await imageGenerationScheduler.schedule(remaining, async (target) => {
+                    attempted = target;
+                    const requestConfig = { ...config, model: target, imageModel: target, count: "1" };
+                    const images = refs.length ? await requestEditOnce(requestConfig, prompt, refs, options) : await requestGenerationOnce(requestConfig, prompt, options);
+                    options?.signal?.throwIfAborted();
+                    if (!images[0]) throw new Error(apiText("noImageReturned"));
+                    return { ...images[0], model: target };
+                }, options?.signal, preferred);
+            } catch (error) {
+                options?.signal?.throwIfAborted();
+                if (!(error instanceof ImageGenerationError) || !error.canFallback) throw error;
+                remaining = remaining.filter((target) => target.value !== attempted);
+                preferred = undefined;
+                if (!remaining.length) throw error;
+            }
+        }
+        throw new Error(i18n.t("imageGeneration.noChannel"));
+    });
+}
+
+async function collectImageResults(tasks: Promise<GeneratedImageResult>[], options?: RequestOptions) {
+    const results = await Promise.allSettled(tasks);
+    options?.signal?.throwIfAborted();
+    const images = results.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
+    if (!images.length) throw (results.find((result) => result.status === "rejected") as PromiseRejectedResult).reason;
+    return images;
+}
+
+export function requestGeneration(config: AiConfig, prompt: string, options?: RequestOptions) {
+    return collectImageResults(requestImageBatch(config, prompt, [], options), options);
+}
+
+export function requestEdit(config: AiConfig, prompt: string, references: ReferenceImage[], options?: RequestOptions) {
+    return collectImageResults(requestImageBatch(config, prompt, references, options), options);
+}
+
+async function requestGenerationOnce(config: AiConfig, prompt: string, options?: RequestOptions) {
     const requestConfig = resolveModelRequestConfig(config, config.model || config.imageModel);
     const n = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
     const script = resolveModelScript(config, config.model || config.imageModel);
@@ -740,14 +817,14 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
             });
             return normalizePluginImages(result).map((dataUrl) => ({ id: nanoid(), dataUrl }));
         } catch (error) {
-            throw new Error(readAxiosError(error, apiText("requestFailed")));
+            throw imageRequestError(error, options, false);
         }
     }
     if (requestConfig.apiFormat === "gemini") {
         try {
-            return await requestGeminiImages(requestConfig, prompt, [], n, options);
+            return await requestGeminiImagesOnce(requestConfig, prompt, [], options);
         } catch (error) {
-            throw new Error(readAxiosError(error, apiText("requestFailed")));
+            throw imageRequestError(error, options);
         }
     }
     const quality = normalizeQuality(config.quality);
@@ -775,11 +852,11 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
         const images = await parseImagePayload(response.data);
         return images;
     } catch (error) {
-        throw new Error(readAxiosError(error, apiText("requestFailed")));
+        throw imageRequestError(error, options);
     }
 }
 
-export async function requestEdit(config: AiConfig, prompt: string, references: ReferenceImage[], options?: RequestOptions) {
+async function requestEditOnce(config: AiConfig, prompt: string, references: ReferenceImage[], options?: RequestOptions) {
     const requestConfig = resolveModelRequestConfig(config, config.model || config.imageModel);
     const n = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
     const requestPrompt = buildImageReferencePromptText(prompt, references);
@@ -801,14 +878,14 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
             });
             return normalizePluginImages(result).map((dataUrl) => ({ id: nanoid(), dataUrl }));
         } catch (error) {
-            throw new Error(readAxiosError(error, apiText("requestFailed")));
+            throw imageRequestError(error, options, false);
         }
     }
     if (requestConfig.apiFormat === "gemini") {
         try {
-            return await requestGeminiImages(requestConfig, requestPrompt, references, n, options);
+            return await requestGeminiImagesOnce(requestConfig, requestPrompt, references, options);
         } catch (error) {
-            throw new Error(readAxiosError(error, apiText("requestFailed")));
+            throw imageRequestError(error, options);
         }
     }
 
@@ -842,7 +919,7 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
         const images = await parseImagePayload(response.data);
         return images;
     } catch (error) {
-        throw new Error(readAxiosError(error, apiText("requestFailed")));
+        throw imageRequestError(error, options);
     }
 }
 
