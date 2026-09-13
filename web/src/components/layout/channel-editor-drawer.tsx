@@ -44,7 +44,7 @@ export function ChannelEditorDrawer({ open, channel, onSave, onClose }: { open: 
     const removeModel = (name: string) => setModels(draft.models.filter((model) => model.name !== name));
 
     const save = () => {
-        onSave({ ...draft, name: draft.name.trim() || t("config.channels.unnamed"), models: normalizeChannelModels(draft.models) });
+        onSave({ ...draft, name: draft.name.trim() || t("config.channels.unnamed"), models: normalizeChannelModels(draft.models), maxConcurrency: draft.maxConcurrency === undefined ? 4 : normalizeChannelConcurrency(draft.maxConcurrency) });
         onClose();
     };
 
@@ -83,7 +83,7 @@ export function ChannelEditorDrawer({ open, channel, onSave, onClose }: { open: 
                 </label>
                 <label className="block">
                     <span className="mb-1 block text-sm font-medium">{t("imageGeneration.maxConcurrency")}</span>
-                    <InputNumber min={1} max={20} precision={0} value={normalizeChannelConcurrency(draft.maxConcurrency)} onChange={(value) => patch({ maxConcurrency: normalizeChannelConcurrency(value) })} className="!w-full" />
+                    <InputNumber min={1} max={20} precision={0} value={draft.maxConcurrency} onChange={(value) => patch({ maxConcurrency: value ?? undefined })} className="!w-full" />
                 </label>
             </div>
 

@@ -869,13 +869,6 @@ function ExpandedImageCard({ node, image, index, onView, onSetPrimary, onDuplica
                     </button>
                 </div>
             ) : null}
-            {image.model ? (
-                <div className="pointer-events-none absolute bottom-2 right-2 z-30 max-w-[calc(100%-16px)]">
-                    <span className="inline-block max-w-full truncate rounded-md bg-black/55 px-2 py-1 text-[11px] font-medium leading-none text-white backdrop-blur-sm">
-                        {modelOptionChannelName(config, image.model)}
-                    </span>
-                </div>
-            ) : null}
             {image.status === "error" ? <BatchImageFailureActions placement="right" image={image} onRetry={onRetry} onDelete={onDelete} /> : null}
         </div>
     );

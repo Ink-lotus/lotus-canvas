@@ -217,12 +217,15 @@ export const useConfigStore = create<ConfigStore>()(
             configTab: "channels",
             shouldPromptContinue: false,
             updateConfig: (key, value) =>
-                set((state) => ({
-                    config: {
-                        ...state.config,
-                        [key]: value,
-                    },
-                })),
+                set((state) => {
+                    const config = { ...state.config, [key]: value };
+                    if (key === "imageModel" && typeof value === "string") {
+                        // 显式清空（[]）保持 fail-closed；未设置（undefined）或已有选择时跟随新默认
+                        const nextTargets = config.imageModelTargets?.length === 0 ? [] : [value];
+                        config.imageModelTargets = normalizeImageModelTargets(value, nextTargets, config.channels);
+                    }
+                    return { config };
+                }),
             setImageModelTargets: (targets) =>
                 set((state) => ({ config: { ...state.config, imageModelTargets: normalizeImageModelTargets(state.config.imageModel, targets, state.config.channels) } })),
             setChannels: (channels) =>
@@ -235,8 +238,12 @@ export const useConfigStore = create<ConfigStore>()(
                         const current = normalizeModelOptionValue(config[key], normalized);
                         config[key] = options.includes(current) ? current : options[0] || "";
                     }
-                    const targets = resolveImageModelTargets(config);
-                    const nextTargets = targets.length || state.config.imageModelTargets?.length === 0 ? targets : undefined;
+                    const previousTargets = state.config.imageModelTargets;
+                    const resolved = resolveImageModelTargets(config);
+                    let nextTargets: string[] | undefined;
+                    if (previousTargets === undefined) nextTargets = undefined;
+                    else if (resolved.length) nextTargets = resolved;
+                    else nextTargets = [];
                     config.imageModelTargets = normalizeImageModelTargets(config.imageModel, nextTargets, config.channels);
                     return { config };
                 }),
@@ -333,7 +340,7 @@ export function createModelChannel(channel?: Partial<ModelChannel>): ModelChanne
         baseUrl: channel?.baseUrl?.trim() || defaultBaseUrlForApiFormat(apiFormat),
         apiKey: channel?.apiKey || "",
         apiFormat,
-        maxConcurrency: normalizeChannelConcurrency(channel?.maxConcurrency),
+        maxConcurrency: channel?.maxConcurrency === undefined ? 4 : normalizeChannelConcurrency(channel.maxConcurrency),
         models: normalizeChannelModels(channel?.models),
     };
 }

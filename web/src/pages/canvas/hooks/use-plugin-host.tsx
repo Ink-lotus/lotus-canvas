@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import { requestEdit, requestGeneration, requestImageQuestion, type AiTextMessage } from "@/services/api/image";
 import { imageToDataUrl } from "@/services/image-storage";
 import { requestVideoGeneration, storeGeneratedVideo } from "@/services/api/video";
-import { decodeChannelModel, selectableModelsByCapability, type AiConfig, type ModelCapability } from "@/stores/use-config-store";
+import { decodeChannelModel, selectableModelsByCapability, resolveImageModelTargets, type AiConfig, type ModelCapability } from "@/stores/use-config-store";
 import { buildGenerationConfig } from "@/lib/canvas/canvas-generation-helpers";
 import { buildNodeContext } from "@/lib/canvas/plugin-node-context";
 import { getNodeDefinition } from "@/lib/canvas/node-registry";
@@ -51,7 +51,12 @@ export function usePluginHost(params: PluginHostParams) {
         };
         return {
             generateImage: async (prompt, options) => {
-                const config = { ...buildGenerationConfig(effectiveConfig, undefined, "image"), count: String(options?.count || 1), ...(options?.model ? { model: options.model, imageModelTargets: [options.model] } : {}), ...(options?.size ? { size: options.size } : {}) };
+                const baseConfig = buildGenerationConfig(effectiveConfig, undefined, "image");
+                const config = { ...baseConfig, count: String(options?.count || 1), ...(options?.size ? { size: options.size } : {}) };
+                if (options?.model) {
+                    const targets = resolveImageModelTargets({ ...config, imageModel: options.model, imageModelTargets: [options.model] });
+                    if (targets.length) config.imageModelTargets = targets;
+                }
                 ensureReady(config);
                 const references = toReferences(options?.references);
                 const items = references.length ? await requestEdit(config, prompt, references, { signal: options?.signal }) : await requestGeneration(config, prompt, { signal: options?.signal });

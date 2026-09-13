@@ -249,3 +249,16 @@ test("proxy routing survives scheduling and unused defaults do not pin a request
     assert.equal(image.model, "b::image-b");
     assert.equal(env.calls[0].url, "http://127.0.0.1:23210/https://b.example/v1/images/generations");
 });
+
+test("legacy channels without maxConcurrency get default value, explicit values preserved", () => {
+    const { configModule: { createModelChannel, normalizeChannelConcurrency } } = environment();
+    const legacy = createModelChannel({ name: "legacy", baseUrl: "https://old.example", models: [] });
+    assert.equal(legacy.maxConcurrency, 4);
+    const explicit1 = createModelChannel({ name: "explicit-1", baseUrl: "https://ex1.example", maxConcurrency: 1, models: [] });
+    assert.equal(explicit1.maxConcurrency, 1);
+    const explicit99 = createModelChannel({ name: "explicit-99", baseUrl: "https://ex99.example", maxConcurrency: 99, models: [] });
+    assert.equal(explicit99.maxConcurrency, 20);
+    assert.equal(normalizeChannelConcurrency(undefined), 1);
+    assert.equal(normalizeChannelConcurrency(1), 1);
+    assert.equal(normalizeChannelConcurrency(99), 20);
+});

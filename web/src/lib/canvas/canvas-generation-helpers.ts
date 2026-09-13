@@ -97,7 +97,7 @@ export function buildGenerationConfig(config: AiConfig, node: CanvasNodeData | u
     const imageModelTargets = resolveImageModelTargets(config, node?.metadata);
     return {
         ...config,
-        model: mode === "image" ? imageModelTargets[0] || "" : resolveModelForCapability(config, node?.metadata?.model, mode),
+        model: mode === "image" ? imageModelTargets[0] || resolveModelForCapability(config, node?.metadata?.model, mode) : resolveModelForCapability(config, node?.metadata?.model, mode),
         imageModelTargets,
         reasoningEffort: node?.metadata?.reasoningEffort || config.reasoningEffort || defaultConfig.reasoningEffort,
         quality: node?.metadata?.quality || config.quality || defaultConfig.quality,

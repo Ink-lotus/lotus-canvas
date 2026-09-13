@@ -110,7 +110,8 @@ export default function ImagePage() {
     const [localSize, setLocalSize] = useState<string>(() => effectiveConfig.size);
     const [localCount, setLocalCount] = useState<string>(() => effectiveConfig.count);
 
-    const modelTargets = localModelTargets.length > 0 ? localModelTargets : resolveImageModelTargets(effectiveConfig);
+    const filteredLocalTargets = localModelTargets.filter((target) => isAiConfigReady(effectiveConfig, target));
+    const modelTargets = filteredLocalTargets.length > 0 ? filteredLocalTargets : (localModelTargets.length > 0 ? [] : resolveImageModelTargets(effectiveConfig));
     const model = modelTargets[0] || effectiveConfig.imageModel || effectiveConfig.model;
     const canGenerate = Boolean(prompt.trim());
     const generationCount = Math.max(1, Math.min(10, Number(localCount) || 1));
@@ -202,7 +203,10 @@ export default function ImagePage() {
         const tasks = requestImageBatch({ ...snapshot.config, count: String(generationCount) }, snapshot.text, snapshot.references, { signal: controller.signal }).map((task, index) => runGenerationSlot(slots[index].id, task, controller.signal));
 
         const result = await Promise.allSettled(tasks);
-        if (generationController.current !== controller) return;
+        if (generationController.current !== controller) {
+            if (agentTaskId) updateAgentTask(agentTaskId, { status: "failed", error: t("common.requestCanceled") });
+            return;
+        }
         if (controller.signal.aborted) setResults((value) => value.map((item) => item.status === "pending" ? { ...item, status: "failed", error: t("common.requestCanceled") } : item));
         const successImages = result.filter((item): item is PromiseFulfilledResult<GeneratedImage> => item.status === "fulfilled").map((item) => item.value);
         const successCount = successImages.length;
@@ -328,10 +332,10 @@ export default function ImagePage() {
         setLogsOpen(false);
         setPrompt(log.prompt);
         setReferences(log.references || []);
-        setImageModelTargets(log.config.imageModelTargets || [log.config.model || log.model]);
-        if (log.config.quality) updateConfig("quality", log.config.quality);
-        if (log.config.size) updateConfig("size", log.config.size);
-        if (log.config.count) updateConfig("count", log.config.count);
+        setLocalModelTargets(log.config.imageModelTargets || [log.config.model || log.model]);
+        if (log.config.quality) setLocalQuality(log.config.quality);
+        if (log.config.size) setLocalSize(log.config.size);
+        if (log.config.count) setLocalCount(log.config.count);
         setResults(log.images.map((image) => ({ id: image.id, status: "success", image })));
     };
 
@@ -512,7 +516,7 @@ export default function ImagePage() {
 
                             <div className="flex items-center justify-between rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 text-sm dark:border-stone-800 dark:bg-stone-900 sm:hidden">
                                 <span className="truncate text-stone-500 dark:text-stone-400">
-                                    {modelOptionLabel(effectiveConfig, model)} · {effectiveConfig.size} · {effectiveConfig.quality}
+                                    {modelOptionLabel(effectiveConfig, model)} · {localSize} · {localQuality}
                                 </span>
                                 <Button size="small" type="text" icon={<SlidersHorizontal className="size-4" />} onClick={() => setSettingsOpen(true)}>
                                     {t("workbench.adjust")}
@@ -616,6 +620,7 @@ export default function ImagePage() {
 function GenerationSettings({ modelTargets, quality, size, count, onModelTargetsChange, onQualityChange, onSizeChange, onCountChange }: { modelTargets: string[]; quality: string; size: string; count: string; onModelTargetsChange: (targets: string[]) => void; onQualityChange: (value: string) => void; onSizeChange: (value: string) => void; onCountChange: (value: string) => void }) {
     const config = useEffectiveConfig();
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
+    const updateConfig = useConfigStore((state) => state.updateConfig);
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const { t } = useTranslation();
 
@@ -623,13 +628,14 @@ function GenerationSettings({ modelTargets, quality, size, count, onModelTargets
         <>
             <label className="col-span-2 block min-w-0 sm:col-span-1">
                 <span className="mb-1.5 block text-sm font-semibold sm:mb-2 sm:text-base">{t("workbench.model")}</span>
-                <ImageModelTargetPicker config={config} onChange={onModelTargetsChange} fullWidth onMissingConfig={() => openConfigDialog(false)} />
+                <ImageModelTargetPicker config={{ ...config, imageModelTargets: modelTargets }} onChange={onModelTargetsChange} fullWidth onMissingConfig={() => openConfigDialog(false)} />
             </label>
             <div className="col-span-2">
                 <ImageSettingsPanel config={{ ...config, quality, size, count }} onConfigChange={(key, value) => {
                     if (key === "quality") onQualityChange(value);
                     else if (key === "size") onSizeChange(value);
                     else if (key === "count") onCountChange(value);
+                    else if (key === "background") updateConfig("background", value);
                 }} theme={theme} showTitle={false} className="space-y-4" maxCount={10} />
             </div>
         </>

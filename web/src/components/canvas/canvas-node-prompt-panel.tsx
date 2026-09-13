@@ -172,7 +172,7 @@ function buildNodeConfig(globalConfig: AiConfig, node: CanvasNodeData, mode: Can
     const imageModelTargets = resolveImageModelTargets(globalConfig, node.metadata);
     return {
         ...globalConfig,
-        model: mode === "image" ? imageModelTargets[0] || "" : resolveModelForCapability(globalConfig, node.metadata?.model, mode),
+        model: mode === "image" ? imageModelTargets[0] || resolveModelForCapability(globalConfig, node.metadata?.model, mode) : resolveModelForCapability(globalConfig, node.metadata?.model, mode),
         imageModelTargets,
         reasoningEffort: node.metadata?.reasoningEffort || globalConfig.reasoningEffort || defaultConfig.reasoningEffort,
         quality: node.metadata?.quality || globalConfig.quality || defaultConfig.quality,

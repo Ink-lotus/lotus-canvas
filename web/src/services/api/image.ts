@@ -757,7 +757,7 @@ export function requestImageBatch(config: AiConfig, prompt: string, references: 
     return Array.from({ length: count }, async (_, index) => {
         const refs = await prepared;
         let remaining = targets;
-        let preferred = index === 0 ? config.imageModel : undefined;
+        let preferred = index === 0 ? selected[0] : undefined;
         while (remaining.length) {
             let attempted = "";
             try {
