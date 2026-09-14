@@ -3,7 +3,7 @@ import { ListPlus, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { defaultBaseUrlForApiFormat, guessCapability, normalizeChannelConcurrency, normalizeChannelModels, type ApiCallFormat, type ChannelModel, type ModelCapability, type ModelChannel } from "@/stores/use-config-store";
+import { DEFAULT_CHANNEL_CONCURRENCY, defaultBaseUrlForApiFormat, guessCapability, normalizeChannelConcurrency, normalizeChannelModels, type ApiCallFormat, type ChannelModel, type ModelCapability, type ModelChannel } from "@/stores/use-config-store";
 import { ModelScriptEditor } from "./model-script-editor";
 import { ModelSelectModal } from "./model-select-modal";
 
@@ -44,7 +44,7 @@ export function ChannelEditorDrawer({ open, channel, onSave, onClose }: { open: 
     const removeModel = (name: string) => setModels(draft.models.filter((model) => model.name !== name));
 
     const save = () => {
-        onSave({ ...draft, name: draft.name.trim() || t("config.channels.unnamed"), models: normalizeChannelModels(draft.models), maxConcurrency: draft.maxConcurrency === undefined ? 4 : normalizeChannelConcurrency(draft.maxConcurrency) });
+        onSave({ ...draft, name: draft.name.trim() || t("config.channels.unnamed"), models: normalizeChannelModels(draft.models), maxConcurrency: draft.maxConcurrency === undefined ? DEFAULT_CHANNEL_CONCURRENCY : normalizeChannelConcurrency(draft.maxConcurrency) });
         onClose();
     };
 

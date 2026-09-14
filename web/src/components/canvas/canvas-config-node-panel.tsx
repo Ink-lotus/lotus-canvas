@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 
 import { ModelPicker } from "@/components/model-picker";
 import { ImageModelTargetPicker } from "@/components/image-model-target-picker";
-import { defaultConfig, resolveImageModelTargets, resolveModelForCapability, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
+import { defaultConfig, resolveGenerationModel, resolveImageModelTargets, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { CanvasImageSettingsPopover } from "./canvas-image-settings-popover";
@@ -156,7 +156,7 @@ function buildNodeConfig(globalConfig: AiConfig, node: CanvasNodeData, mode: Can
     const imageModelTargets = resolveImageModelTargets(globalConfig, node.metadata);
     return {
         ...globalConfig,
-        model: mode === "image" ? imageModelTargets[0] || resolveModelForCapability(globalConfig, node.metadata?.model, mode) : resolveModelForCapability(globalConfig, node.metadata?.model, mode),
+        model: resolveGenerationModel(globalConfig, node.metadata?.model, mode, imageModelTargets),
         imageModelTargets,
         reasoningEffort: node.metadata?.reasoningEffort || globalConfig.reasoningEffort || defaultConfig.reasoningEffort,
         quality: node.metadata?.quality || globalConfig.quality || defaultConfig.quality,

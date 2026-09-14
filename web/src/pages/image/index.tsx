@@ -62,7 +62,7 @@ type GenerationLog = {
     thumbnails: string[];
 };
 
-type GenerationLogConfig = Pick<AiConfig, "model" | "imageModel" | "imageModelTargets" | "quality" | "size" | "count">;
+type GenerationLogConfig = Pick<AiConfig, "model" | "imageModel" | "imageModelTargets" | "quality" | "size" | "background" | "count">;
 
 const LOG_STORE_KEY = "infinite-canvas:image_generation_logs";
 const RESULT_ACTION_BUTTON_CLASS = "min-w-0 px-1.5 [&_.ant-btn-icon]:shrink-0 [&>span:last-child]:min-w-0 [&>span:last-child]:truncate";
@@ -73,10 +73,7 @@ export default function ImagePage() {
     const { t } = useTranslation();
     const fileInputRef = useRef<HTMLInputElement>(null);
     const dragDepthRef = useRef(0);
-    const config = useConfigStore((state) => state.config);
     const effectiveConfig = useEffectiveConfig();
-    const updateConfig = useConfigStore((state) => state.updateConfig);
-    const setImageModelTargets = useConfigStore((state) => state.setImageModelTargets);
     const isAiConfigReady = useConfigStore((state) => state.isAiConfigReady);
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const addAsset = useAssetStore((state) => state.addAsset);
@@ -108,6 +105,7 @@ export default function ImagePage() {
     const [localModelTargets, setLocalModelTargets] = useState<string[]>(() => resolveImageModelTargets(effectiveConfig));
     const [localQuality, setLocalQuality] = useState<string>(() => effectiveConfig.quality);
     const [localSize, setLocalSize] = useState<string>(() => effectiveConfig.size);
+    const [localBackground, setLocalBackground] = useState<string>(() => effectiveConfig.background);
     const [localCount, setLocalCount] = useState<string>(() => effectiveConfig.count);
 
     const filteredLocalTargets = localModelTargets.filter((target) => isAiConfigReady(effectiveConfig, target));
@@ -335,6 +333,7 @@ export default function ImagePage() {
         setLocalModelTargets(log.config.imageModelTargets || [log.config.model || log.model]);
         if (log.config.quality) setLocalQuality(log.config.quality);
         if (log.config.size) setLocalSize(log.config.size);
+        setLocalBackground(log.config.background);
         if (log.config.count) setLocalCount(log.config.count);
         setResults(log.images.map((image) => ({ id: image.id, status: "success", image })));
     };
@@ -350,7 +349,7 @@ export default function ImagePage() {
             openConfigDialog(true);
             return null;
         }
-        return { text, config: { ...effectiveConfig, model, imageModelTargets: modelTargets, quality: localQuality, size: localSize, count: "1" }, references: [...references] };
+        return { text, config: { ...effectiveConfig, model, imageModelTargets: modelTargets, quality: localQuality, size: localSize, background: localBackground, count: "1" }, references: [...references] };
     };
 
     const runGenerationSlot = async (id: string, task: Promise<GeneratedImageResult>, signal: AbortSignal) => {
@@ -374,7 +373,7 @@ export default function ImagePage() {
         const result = results[index];
         if (result?.status !== "failed" || retryControllers.current.has(result.id) || generationController.current) return;
         const source = result.source;
-        const snapshot = source ? { text: prompt, config: { ...effectiveConfig, model: source.model, imageModelTargets: [source.model], count: "1" }, references } : buildRequestSnapshot();
+        const snapshot = source ? { text: prompt, config: { ...effectiveConfig, model: source.model, imageModelTargets: [source.model], background: localBackground, count: "1" }, references } : buildRequestSnapshot();
         if (!snapshot) return;
         const controller = new AbortController();
         retryControllers.current.set(result.id, controller);
@@ -528,10 +527,12 @@ export default function ImagePage() {
                                     modelTargets={localModelTargets}
                                     quality={localQuality}
                                     size={localSize}
+                                    background={localBackground}
                                     count={localCount}
                                     onModelTargetsChange={setLocalModelTargets}
                                     onQualityChange={setLocalQuality}
                                     onSizeChange={setLocalSize}
+                                    onBackgroundChange={setLocalBackground}
                                     onCountChange={setLocalCount}
                                 />
                             </div>
@@ -600,10 +601,12 @@ export default function ImagePage() {
                         modelTargets={localModelTargets}
                         quality={localQuality}
                         size={localSize}
+                        background={localBackground}
                         count={localCount}
                         onModelTargetsChange={setLocalModelTargets}
                         onQualityChange={setLocalQuality}
                         onSizeChange={setLocalSize}
+                        onBackgroundChange={setLocalBackground}
                         onCountChange={setLocalCount}
                     />
                 </div>
@@ -617,10 +620,9 @@ export default function ImagePage() {
     );
 }
 
-function GenerationSettings({ modelTargets, quality, size, count, onModelTargetsChange, onQualityChange, onSizeChange, onCountChange }: { modelTargets: string[]; quality: string; size: string; count: string; onModelTargetsChange: (targets: string[]) => void; onQualityChange: (value: string) => void; onSizeChange: (value: string) => void; onCountChange: (value: string) => void }) {
+function GenerationSettings({ modelTargets, quality, size, background, count, onModelTargetsChange, onQualityChange, onSizeChange, onBackgroundChange, onCountChange }: { modelTargets: string[]; quality: string; size: string; background: string; count: string; onModelTargetsChange: (targets: string[]) => void; onQualityChange: (value: string) => void; onSizeChange: (value: string) => void; onBackgroundChange: (value: string) => void; onCountChange: (value: string) => void }) {
     const config = useEffectiveConfig();
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
-    const updateConfig = useConfigStore((state) => state.updateConfig);
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const { t } = useTranslation();
 
@@ -631,11 +633,11 @@ function GenerationSettings({ modelTargets, quality, size, count, onModelTargets
                 <ImageModelTargetPicker config={{ ...config, imageModelTargets: modelTargets }} onChange={onModelTargetsChange} fullWidth onMissingConfig={() => openConfigDialog(false)} />
             </label>
             <div className="col-span-2">
-                <ImageSettingsPanel config={{ ...config, quality, size, count }} onConfigChange={(key, value) => {
+                <ImageSettingsPanel config={{ ...config, quality, size, background, count }} onConfigChange={(key, value) => {
                     if (key === "quality") onQualityChange(value);
                     else if (key === "size") onSizeChange(value);
+                    else if (key === "background") onBackgroundChange(value);
                     else if (key === "count") onCountChange(value);
-                    else if (key === "background") updateConfig("background", value);
                 }} theme={theme} showTitle={false} className="space-y-4" maxCount={10} />
             </div>
         </>
@@ -905,6 +907,7 @@ function normalizeLogConfig(log: Partial<GenerationLog>): GenerationLogConfig {
         imageModelTargets: log.config?.imageModelTargets,
         quality: log.config?.quality || log.quality || "",
         size: log.config?.size || log.size || "",
+        background: log.config?.background || "",
         count: log.config?.count || String(log.imageCount || log.successCount || 1),
     };
 }
@@ -954,6 +957,7 @@ function buildLog({
         imageModelTargets: config.imageModelTargets,
         quality: config.quality,
         size: config.size,
+        background: config.background,
         count: config.count,
     };
     return {

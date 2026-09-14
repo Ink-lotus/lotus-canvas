@@ -718,20 +718,20 @@ function parseGeminiImagePayload(payload: GeminiPayload) {
 
 export type GeneratedImageResult = { id: string; dataUrl: string; model: string };
 
-class ImageGenerationError extends Error {
-    constructor(message: string, readonly canFallback: boolean) {
+export class ImageGenerationError extends Error {
+    constructor(message: string, readonly canFallback: boolean, readonly model?: string) {
         super(message);
         this.name = "ImageGenerationError";
     }
 }
 
-function imageRequestError(error: unknown, options?: RequestOptions, builtIn = true) {
+function imageRequestError(error: unknown, options?: RequestOptions, builtIn = true, model?: string) {
     options?.signal?.throwIfAborted();
     if (axios.isCancel(error)) return new DOMException("Aborted", "AbortError");
     if (error instanceof Error && error.name === "AbortError") return error;
     // Only explicit submission refusals are eligible. Network/5xx errors may have already incurred a charge.
     const canFallback = builtIn && axios.isAxiosError(error) && [401, 403, 404, 429].includes(error.response?.status || 0);
-    return new ImageGenerationError(readAxiosError(error, apiText("requestFailed")), canFallback);
+    return new ImageGenerationError(readAxiosError(error, apiText("requestFailed")), canFallback, model);
 }
 
 export function requestImageBatch(config: AiConfig, prompt: string, references: ReferenceImage[] = [], options?: RequestOptions): Promise<GeneratedImageResult>[] {
@@ -817,14 +817,14 @@ async function requestGenerationOnce(config: AiConfig, prompt: string, options?:
             });
             return normalizePluginImages(result).map((dataUrl) => ({ id: nanoid(), dataUrl }));
         } catch (error) {
-            throw imageRequestError(error, options, false);
+            throw imageRequestError(error, options, false, config.model || config.imageModel);
         }
     }
     if (requestConfig.apiFormat === "gemini") {
         try {
             return await requestGeminiImagesOnce(requestConfig, prompt, [], options);
         } catch (error) {
-            throw imageRequestError(error, options);
+            throw imageRequestError(error, options, true, config.model || config.imageModel);
         }
     }
     const quality = normalizeQuality(config.quality);
@@ -852,7 +852,7 @@ async function requestGenerationOnce(config: AiConfig, prompt: string, options?:
         const images = await parseImagePayload(response.data);
         return images;
     } catch (error) {
-        throw imageRequestError(error, options);
+        throw imageRequestError(error, options, true, config.model || config.imageModel);
     }
 }
 
@@ -878,14 +878,14 @@ async function requestEditOnce(config: AiConfig, prompt: string, references: Ref
             });
             return normalizePluginImages(result).map((dataUrl) => ({ id: nanoid(), dataUrl }));
         } catch (error) {
-            throw imageRequestError(error, options, false);
+            throw imageRequestError(error, options, false, config.model || config.imageModel);
         }
     }
     if (requestConfig.apiFormat === "gemini") {
         try {
             return await requestGeminiImagesOnce(requestConfig, requestPrompt, references, options);
         } catch (error) {
-            throw imageRequestError(error, options);
+            throw imageRequestError(error, options, true, config.model || config.imageModel);
         }
     }
 
@@ -919,7 +919,7 @@ async function requestEditOnce(config: AiConfig, prompt: string, references: Ref
         const images = await parseImagePayload(response.data);
         return images;
     } catch (error) {
-        throw imageRequestError(error, options);
+        throw imageRequestError(error, options, true, config.model || config.imageModel);
     }
 }
 

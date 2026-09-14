@@ -53,9 +53,10 @@ export function usePluginHost(params: PluginHostParams) {
             generateImage: async (prompt, options) => {
                 const baseConfig = buildGenerationConfig(effectiveConfig, undefined, "image");
                 const config = { ...baseConfig, count: String(options?.count || 1), ...(options?.size ? { size: options.size } : {}) };
-                if (options?.model) {
-                    const targets = resolveImageModelTargets({ ...config, imageModel: options.model, imageModelTargets: [options.model] });
-                    if (targets.length) config.imageModelTargets = targets;
+                if (options?.model !== undefined) {
+                    const targets = resolveImageModelTargets(config, { model: options.model, imageModelTargets: [options.model] });
+                    config.imageModelTargets = targets;
+                    config.model = targets[0] || "";
                 }
                 ensureReady(config);
                 const references = toReferences(options?.references);

@@ -136,13 +136,29 @@ test("network, server, validation and response errors never trigger another paid
     for (const error of [new Error("Network Error"), refusal(400), refusal(500), refusal(502)]) {
         const env = environment();
         env.setPost(async () => { throw error; });
-        await assert.rejects(env.api.requestGeneration(env.config, "failure"));
+        await assert.rejects(env.api.requestGeneration(env.config, "failure"), (reason) => {
+            assert.equal(reason.model, "a::image-a");
+            return true;
+        });
         assert.equal(env.calls.length, 1);
     }
     const env = environment();
     env.setPost(async () => ({ data: { data: [] } }));
-    await assert.rejects(env.api.requestGeneration(env.config, "empty"));
+    await assert.rejects(env.api.requestGeneration(env.config, "empty"), (reason) => {
+        assert.equal(reason.model, "a::image-a");
+        return true;
+    });
     assert.equal(env.calls.length, 1);
+});
+
+test("fallback exhaustion reports the last attempted target", async () => {
+    const env = environment();
+    env.setPost(async () => { throw refusal(429); });
+    await assert.rejects(env.api.requestGeneration(env.config, "fallback failure"), (reason) => {
+        assert.equal(reason.model, "b::image-b");
+        return true;
+    });
+    assert.equal(env.calls.length, 2);
 });
 
 test("custom scripts run as single-image jobs and script failures never fall back", async () => {
@@ -206,27 +222,28 @@ test("API cancellation drops queued requests and never falls back on late comple
 });
 
 test("explicit node selection wins; other media inherit image defaults and missing targets fail closed", () => {
-    const { config, configModule: { resolveImageModelTargets } } = environment();
+    const { config, configModule: { resolveGenerationModel, resolveImageModelTargets } } = environment();
     config.channels[0].models.push({ name: "text", capability: "text" });
     assert.deepEqual(resolveImageModelTargets(config, { model: "b::image-b" }), ["b::image-b"]);
     assert.deepEqual(resolveImageModelTargets(config, { model: "a::image-a", imageModelTargets: ["b::image-b"] }), ["b::image-b"]);
     assert.deepEqual(resolveImageModelTargets(config, { model: "a::text" }), config.imageModelTargets);
     assert.deepEqual(resolveImageModelTargets(config, { model: "missing::image" }), []);
     assert.deepEqual(resolveImageModelTargets(config, { imageModelTargets: [] }), []);
+    assert.equal(resolveGenerationModel(config, "a::image-a", "image", []), "");
 });
 
 test("selection is independent of the default and channel changes are atomic and persisted", async () => {
     const { config, configModule: { useConfigStore } } = environment();
     const store = useConfigStore.getState();
-    store.setImageModelTargets(["b::image-b"]);
+    store.setImageModelTargets(["a::image-a", "b::image-b"]);
     assert.equal(useConfigStore.getState().config.imageModel, "a::image-a");
     store.updateConfig("imageModel", "b::image-b");
-    assert.deepEqual(useConfigStore.getState().config.imageModelTargets, ["b::image-b"]);
+    assert.deepEqual(useConfigStore.getState().config.imageModelTargets, ["a::image-a", "b::image-b"]);
     const channels = structuredClone(config.channels);
     channels[0].models.push({ name: "other", capability: "image" });
     store.setChannels(channels);
     store.updateConfig("imageModel", "a::other");
-    assert.deepEqual(useConfigStore.getState().config.imageModelTargets, ["a::other"]);
+    assert.deepEqual(useConfigStore.getState().config.imageModelTargets, ["a::image-a", "b::image-b"]);
     store.setImageModelTargets([]);
     store.updateConfig("imageModel", "b::image-b");
     assert.deepEqual(useConfigStore.getState().config.imageModelTargets, []);
@@ -242,6 +259,12 @@ test("selection is independent of the default and channel changes are atomic and
     assert.deepEqual(useConfigStore.getState().config.imageModelTargets, []);
 });
 
+test("an explicit empty target list fails closed without a request", async () => {
+    const env = environment();
+    await assert.rejects(env.api.requestGeneration({ ...env.config, imageModelTargets: [] }, "blocked"));
+    assert.equal(env.calls.length, 0);
+});
+
 test("proxy routing survives scheduling and unused defaults do not pin a request", async () => {
     const env = environment();
     env.configModule.useConfigStore.getState().updateConfig("proxyEnabled", true);
@@ -250,15 +273,27 @@ test("proxy routing survives scheduling and unused defaults do not pin a request
     assert.equal(env.calls[0].url, "http://127.0.0.1:23210/https://b.example/v1/images/generations");
 });
 
-test("legacy channels without maxConcurrency get default value, explicit values preserved", () => {
-    const { configModule: { createModelChannel, normalizeChannelConcurrency } } = environment();
+test("channel concurrency defaults to one and clamps explicit values", async () => {
+    const { config, configModule: { CONFIG_STORE_KEY, createModelChannel, defaultConfig, normalizeChannelConcurrency, useConfigStore }, stored } = environment();
+    assert.equal(defaultConfig.channels[0].maxConcurrency, 1);
     const legacy = createModelChannel({ name: "legacy", baseUrl: "https://old.example", models: [] });
-    assert.equal(legacy.maxConcurrency, 4);
+    assert.equal(legacy.maxConcurrency, 1);
     const explicit1 = createModelChannel({ name: "explicit-1", baseUrl: "https://ex1.example", maxConcurrency: 1, models: [] });
     assert.equal(explicit1.maxConcurrency, 1);
     const explicit99 = createModelChannel({ name: "explicit-99", baseUrl: "https://ex99.example", maxConcurrency: 99, models: [] });
     assert.equal(explicit99.maxConcurrency, 20);
     assert.equal(normalizeChannelConcurrency(undefined), 1);
+    assert.equal(normalizeChannelConcurrency(0), 1);
     assert.equal(normalizeChannelConcurrency(1), 1);
     assert.equal(normalizeChannelConcurrency(99), 20);
+    const persistedConfig = structuredClone(config);
+    delete persistedConfig.channels[0].maxConcurrency;
+    stored.set(CONFIG_STORE_KEY, JSON.stringify({ state: { config: persistedConfig, webdav: {} }, version: 0 }));
+    await useConfigStore.persist.rehydrate();
+    assert.equal(useConfigStore.getState().config.channels[0].maxConcurrency, 1);
+    const persistedWithoutChannels = structuredClone(config);
+    delete persistedWithoutChannels.channels;
+    stored.set(CONFIG_STORE_KEY, JSON.stringify({ state: { config: persistedWithoutChannels, webdav: {} }, version: 0 }));
+    await useConfigStore.persist.rehydrate();
+    assert.equal(useConfigStore.getState().config.channels[0].maxConcurrency, 1);
 });

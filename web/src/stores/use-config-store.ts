@@ -77,6 +77,7 @@ export const CONFIG_STORE_KEY = "infinite-canvas:ai_config_store";
 const CHANNEL_MODEL_SEPARATOR = "::";
 const OPENAI_BASE_URL = "https://api.openai.com";
 const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com";
+export const DEFAULT_CHANNEL_CONCURRENCY = 1;
 export const LOCAL_PROXY_PACKAGE = "@basketikun/canvas-proxy";
 export const DEFAULT_LOCAL_PROXY_URL = "http://127.0.0.1:23210";
 
@@ -92,6 +93,7 @@ export const defaultConfig: AiConfig = {
             baseUrl: OPENAI_BASE_URL,
             apiKey: "",
             apiFormat: "openai",
+            maxConcurrency: DEFAULT_CHANNEL_CONCURRENCY,
             models: [
                 { name: "gpt-image-2", capability: "image" },
                 { name: "grok-imagine-video", capability: "video" },
@@ -193,6 +195,10 @@ export function resolveModelForCapability(config: AiConfig, currentModel: string
     return fallbackModel;
 }
 
+export function resolveGenerationModel(config: AiConfig, currentModel: string | undefined, capability: ModelCapability, imageModelTargets: string[] = []) {
+    return capability === "image" ? imageModelTargets[0] || "" : resolveModelForCapability(config, currentModel, capability);
+}
+
 export function selectableModelsByCapability(config: AiConfig, capability?: ModelCapability) {
     if (!capability) return config.models;
     return config.channels.flatMap((channel) => channel.models.filter((model) => model.capability === capability).map((model) => encodeChannelModel(channel.id, model.name)));
@@ -217,15 +223,7 @@ export const useConfigStore = create<ConfigStore>()(
             configTab: "channels",
             shouldPromptContinue: false,
             updateConfig: (key, value) =>
-                set((state) => {
-                    const config = { ...state.config, [key]: value };
-                    if (key === "imageModel" && typeof value === "string") {
-                        // 显式清空（[]）保持 fail-closed；未设置（undefined）或已有选择时跟随新默认
-                        const nextTargets = config.imageModelTargets?.length === 0 ? [] : [value];
-                        config.imageModelTargets = normalizeImageModelTargets(value, nextTargets, config.channels);
-                    }
-                    return { config };
-                }),
+                set((state) => ({ config: { ...state.config, [key]: value } })),
             setImageModelTargets: (targets) =>
                 set((state) => ({ config: { ...state.config, imageModelTargets: normalizeImageModelTargets(state.config.imageModel, targets, state.config.channels) } })),
             setChannels: (channels) =>
@@ -340,7 +338,7 @@ export function createModelChannel(channel?: Partial<ModelChannel>): ModelChanne
         baseUrl: channel?.baseUrl?.trim() || defaultBaseUrlForApiFormat(apiFormat),
         apiKey: channel?.apiKey || "",
         apiFormat,
-        maxConcurrency: channel?.maxConcurrency === undefined ? 4 : normalizeChannelConcurrency(channel.maxConcurrency),
+        maxConcurrency: channel?.maxConcurrency === undefined ? DEFAULT_CHANNEL_CONCURRENCY : normalizeChannelConcurrency(channel.maxConcurrency),
         models: normalizeChannelModels(channel?.models),
     };
 }
@@ -460,7 +458,7 @@ export function resolveImageModelTargets(config: AiConfig, selection?: { model?:
 }
 
 export function normalizeChannelConcurrency(value: unknown) {
-    return Math.max(1, Math.min(20, Math.floor(Number(value) || 1)));
+    return Math.max(1, Math.min(20, Math.floor(Number(value) || DEFAULT_CHANNEL_CONCURRENCY)));
 }
 
 export function modelOptionsFromChannels(channels: ModelChannel[]) {
@@ -515,6 +513,7 @@ function normalizeChannels(config: AiConfig) {
                 baseUrl: config.baseUrl || defaultConfig.baseUrl,
                 apiKey: config.apiKey || "",
                 apiFormat: config.apiFormat || defaultConfig.apiFormat,
+                maxConcurrency: DEFAULT_CHANNEL_CONCURRENCY,
                 models: normalizeChannelModels([config.model, config.imageModel, config.videoModel, config.textModel, config.audioModel].map(modelOptionName)),
             }),
         );

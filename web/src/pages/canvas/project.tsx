@@ -5,7 +5,7 @@ import { Group, Video } from "lucide-react";
 import { saveAs } from "file-saver";
 import { useTranslation } from "react-i18next";
 
-import { requestEdit, requestGeneration, requestImageBatch, requestImageQuestion, type GeneratedImageResult } from "@/services/api/image";
+import { ImageGenerationError, requestEdit, requestGeneration, requestImageBatch, requestImageQuestion, type GeneratedImageResult } from "@/services/api/image";
 import { requestAudioGeneration, storeGeneratedAudio } from "@/services/api/audio";
 import { createVideoGenerationTask, isVideoTaskFailed, storeGeneratedVideo, waitForVideoGenerationTask } from "@/services/api/video";
 import { defaultConfig, resolveImageModelTargets, useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
@@ -2413,7 +2413,7 @@ function InfiniteCanvasPage() {
                         metadata: {
                             prompt: effectivePrompt,
                             status: NODE_STATUS_LOADING,
-                            images: imageIds.map((id) => ({ id, status: NODE_STATUS_LOADING, content: "", naturalWidth: 0, naturalHeight: 0, bytes: 0, mimeType: "", model: generationConfig.model })),
+                            images: imageIds.map((id) => ({ id, status: NODE_STATUS_LOADING, content: "", naturalWidth: 0, naturalHeight: 0, bytes: 0, mimeType: "" })),
                             ...generationMetadata,
                         },
                     };
@@ -2464,8 +2464,9 @@ function InfiniteCanvasPage() {
                     const tasks = requestImageBatch({ ...generationConfig, count: String(imageIds.length) }, effectivePrompt, referenceImages, { signal: controller.signal });
                     await Promise.all(
                         imageIds.map(async (imageId, index) => {
+                            let image: GeneratedImageResult | undefined;
                             try {
-                                const image = await tasks[index];
+                                image = await tasks[index];
                                 const uploaded = await storeGeneratedImage(`${rootId}:${imageId}`, image, controller.signal);
                                 const imageSize = fitNodeSize(uploaded.width, uploaded.height, imageConfig.width, imageConfig.height);
                                 const item: CanvasNodeImage = { id: imageId, model: image.model, status: NODE_STATUS_SUCCESS, content: uploaded.url, storageKey: uploaded.storageKey, naturalWidth: uploaded.width, naturalHeight: uploaded.height, bytes: uploaded.bytes, mimeType: uploaded.mimeType };
@@ -2500,9 +2501,10 @@ function InfiniteCanvasPage() {
                             } catch (error) {
                                 if (isGenerationCanceled(error)) return false;
                                 const errorDetails = error instanceof Error ? error.message : t("canvas.projectPage.generationFailed");
+                                const model = error instanceof ImageGenerationError ? error.model : image?.model;
                                 if (!firstError) firstError = errorDetails;
                                 hasFailure = true;
-                                setNodes((prev) => prev.map((node) => (node.id === rootId ? { ...node, metadata: { ...node.metadata, images: node.metadata?.images?.map((image) => (image.id === imageId ? { ...image, status: NODE_STATUS_ERROR, errorDetails, model: image.model } : image)) } } : node)));
+                                setNodes((prev) => prev.map((node) => (node.id === rootId ? { ...node, metadata: { ...node.metadata, images: node.metadata?.images?.map((item) => (item.id === imageId ? { ...item, status: NODE_STATUS_ERROR, errorDetails, model } : item)) } } : node)));
                             }
                             return false;
                         }),
@@ -2806,6 +2808,7 @@ function InfiniteCanvasPage() {
             setRunningNodeId(node.id);
             setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_LOADING, errorDetails: undefined, images: item.metadata?.images?.map((image) => (image.id === imageId ? { ...image, status: NODE_STATUS_LOADING, errorDetails: undefined } : image)) } } : item)));
             const controller = startGenerationRequest(node.id, sourceNode.id, node.id);
+            let generatedImage: GeneratedImageResult | undefined;
 
             try {
                 if (node.type === CanvasNodeType.Text) {
@@ -2844,6 +2847,7 @@ function InfiniteCanvasPage() {
                     ? await requestEdit(generationConfig, prompt, retryImages, { signal: controller.signal }).then((items) => items[0])
                     : await requestGeneration(generationConfig, prompt, { signal: controller.signal }).then((items) => items[0]));
                 if (!image) throw new Error(t("canvas.projectPage.generationFailed"));
+                generatedImage = image;
                 const uploadedImage = await storeGeneratedImage(sourceKey, image, controller.signal);
                 const imageConfig = NODE_DEFAULT_SIZE[CanvasNodeType.Image];
                 const retryImage: CanvasNodeImage = {
@@ -2894,6 +2898,7 @@ function InfiniteCanvasPage() {
             } catch (error) {
                 if (isGenerationCanceled(error)) return;
                 const errorDetails = error instanceof Error ? error.message : t("canvas.projectPage.generationFailed");
+                const model = error instanceof ImageGenerationError ? error.model : generatedImage?.model;
                 message.error(errorDetails);
                 setNodes((prev) =>
                     prev.map((item) =>
@@ -2904,7 +2909,7 @@ function InfiniteCanvasPage() {
                                       ...item.metadata,
                                       status: item.metadata?.content ? NODE_STATUS_SUCCESS : NODE_STATUS_ERROR,
                                       errorDetails: item.metadata?.content ? undefined : errorDetails,
-                                      images: item.metadata?.images?.map((image) => (image.id === imageId ? { ...image, status: NODE_STATUS_ERROR, errorDetails } : image)),
+                                      images: item.metadata?.images?.map((image) => (image.id === imageId ? { ...image, status: NODE_STATUS_ERROR, errorDetails, model } : image)),
                                       ...(isVideoTaskFailed(error) && item.type === CanvasNodeType.Video ? { videoTaskId: undefined } : {}),
                                   },
                               }
